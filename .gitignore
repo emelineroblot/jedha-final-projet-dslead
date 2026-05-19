@@ -9,9 +9,8 @@ dist/
 build/
 .eggs/
 
-# Data (géré par DVC)
-data/raw/
-data/processed/
+# Data (géré par DVC — les .dvc pointer files sont committés, pas les données)
+data/*.csv
 mlruns/
 reports/*.html
 reports/*.json

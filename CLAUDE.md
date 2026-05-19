@@ -98,11 +98,19 @@ python src/retraining/scripts/simulate_drift.py
 
 ## Données rivalytics (5 tables)
 
-- **rivalytics_accounts** — target : `churn_flag` (booléen). Clé : `account_id`.
-- **rivalytics_subscriptions** — MRR=0 pour trials, `end_date` null = actif, upgrades/downgrades = signal fort.
-- **rivalytics_feature_usage** — noms génériques `feature_1..N`, `error_count` (frustration), `is_beta_feature` (engagement).
-- **rivalytics_churn_events** — `reason_code`, `feedback_text`, exclure `is_reactivation=True` pour éviter double comptage.
-- **rivalytics_support_tickets** — `satisfaction_score` nullable à imputer, `escalation_flag` signal fort.
+- **rivalytics_accounts** — 500 lignes. Target : `churn_flag` (22% True / 78% False). Clé : `account_id`. CSV dans `data/` (pas `data/raw/`).
+- **rivalytics_subscriptions** — 5 000 lignes (10/compte). `end_date` null = actif (4 514 actifs). `mrr_amount=0` = trial (778). `is_trial` déjà présent dans le CSV, ne pas recalculer. Clé de jointure avec `feature_usage` : `subscription_id`.
+- **rivalytics_feature_usage** — 25 000 lignes. **Pas de `account_id` direct** : joint via `subscription_id → subscriptions → account_id`. 40 features génériques, `error_count`, `is_beta_feature`.
+- **rivalytics_churn_events** — 600 lignes (539 hors réactivation). **Ne pas utiliser `churn_event_count` comme feature ML** : 339 comptes ont des events mais seulement 110 ont `churn_flag=True` → fuite de données garantie.
+- **rivalytics_support_tickets** — 2 000 lignes. `satisfaction_score` : 825 nulls (41%) → imputation médiane. 8 comptes sans ticket → nulls dans le merge, imputer à 0.
+
+### Learnings EDA (Phase 1)
+
+- `plan_tier` non discriminant : taux de churn ~22% sur les 3 tiers.
+- `industry` et `referral_source` utiles : DevTools 31% vs Cybersecurity 16% ; event 30% vs partner 15%.
+- `tenure_days` contre-intuitif : churners médiane 381j vs non-churners 302j (artefact dataset fictif probable).
+- Corrélations brutes toutes < 0.09 → dataset synthétique ; XGBoost pour les interactions non-linéaires.
+- `error_rate` et `satisfaction_score` identiques entre classes en brut → features dérivées indispensables.
 
 ## Architecture des modules clés
 

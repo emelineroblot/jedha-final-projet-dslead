@@ -1,0 +1,84 @@
+services:
+
+  postgres:
+    image: postgres:15
+    environment:
+      POSTGRES_USER: churnguard
+      POSTGRES_PASSWORD: churnguard
+      POSTGRES_DB: churnguard
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U churnguard"]
+      interval: 5s
+      retries: 5
+
+  mlflow:
+    image: ghcr.io/mlflow/mlflow:v2.13.0
+    command: >
+      mlflow server
+      --backend-store-uri postgresql://churnguard:churnguard@postgres:5432/churnguard
+      --default-artifact-root /mlruns
+      --host 0.0.0.0
+      --port 5000
+    ports:
+      - "5000:5000"
+    volumes:
+      - ../../mlruns:/mlruns
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  api:
+    build:
+      context: ../..
+      dockerfile: Dockerfile
+    ports:
+      - "8000:8000"
+    environment:
+      MLFLOW_TRACKING_URI: http://mlflow:5000
+      MLFLOW_MODEL_NAME: churnguard-model
+      MLFLOW_MODEL_STAGE: Production
+    volumes:
+      - ../../src:/app/src
+      - ../../data:/app/data
+    depends_on:
+      - mlflow
+    command: uvicorn src.api.main:app --host 0.0.0.0 --port 8000 --reload
+
+  airflow-init:
+    image: apache/airflow:2.9.1
+    environment:
+      AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql+psycopg2://churnguard:churnguard@postgres:5432/churnguard
+      AIRFLOW__CORE__EXECUTOR: LocalExecutor
+    command: db init
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  airflow-webserver:
+    image: apache/airflow:2.9.1
+    ports:
+      - "8080:8080"
+    environment:
+      AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql+psycopg2://churnguard:churnguard@postgres:5432/churnguard
+      AIRFLOW__CORE__EXECUTOR: LocalExecutor
+    volumes:
+      - ../../src/retraining/dags:/opt/airflow/dags
+    depends_on:
+      - airflow-init
+    command: webserver
+
+  airflow-scheduler:
+    image: apache/airflow:2.9.1
+    environment:
+      AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql+psycopg2://churnguard:churnguard@postgres:5432/churnguard
+      AIRFLOW__CORE__EXECUTOR: LocalExecutor
+    volumes:
+      - ../../src/retraining/dags:/opt/airflow/dags
+    depends_on:
+      - airflow-init
+    command: scheduler
+
+volumes:
+  postgres_data:

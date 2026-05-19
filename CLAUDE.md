@@ -28,7 +28,7 @@ final-project-dslead/
 │   ├── dev/docker-compose.yml
 │   └── prod/docker-compose.yml
 ├── .github/workflows/           # CI/CD GitHub Actions
-└── mlruns/                      # MLflow (gitignored, DVC tracké)
+└── mlruns/                      # MLflow (gitignored — sera DVC-tracké en Phase 5)
 ```
 
 ## Roadmap (11 phases)
@@ -39,7 +39,7 @@ final-project-dslead/
 | 1 | EDA & Preprocessing | S1 | ✓ |
 | 2 | Feature Engineering | S1 | ✓ |
 | 3 | Entraînement & sélection du modèle | S1–S2 | ✓ |
-| 4 | MLflow + DVC — Versioning | S2 | ⏳ |
+| 4 | MLflow + DVC — Versioning | S2 | ✓ |
 | 5 | API FastAPI | S2 | ⏳ |
 | 6 | Containerisation Docker | S2 | ⏳ |
 | 7 | Pipeline CI/CD GitHub Actions | S2–S3 | ⏳ |
@@ -48,7 +48,7 @@ final-project-dslead/
 | 10 | Documentation & diagramme | S4 | ⏳ |
 | 11 | Présentation jury | S5 | ⏳ |
 
-**Branche courante** : `develop` — phases 0–3 mergées depuis `feature/training`.
+**Branche courante** : `develop` — phases 0–4 sur develop (0–3 mergées depuis `feature/training`, phase 4 committée directement).
 
 Détail complet dans `contexte/roadmap.md`.
 
@@ -178,6 +178,27 @@ python src/retraining/scripts/simulate_drift.py
 - Docker Compose séparés dev/prod — jamais `docker/docker-compose.yml`
 - `contexte/` et `.claude/` exclus du gitignore (documents de cadrage non versionnés)
 - Modèle MLflow Registry nommé `churnguard-model`, stage `Production` = modèle actif servi par l'API
+
+## Phase 4 — DVC Versioning ✓
+
+**Remote DagsHub** : `https://dagshub.com/emelineroblot/churnguard.dvc`
+
+**Fichiers trackés** (64 MB) :
+- `data/customer_churn_dataset-training-master.csv` (22 MB) — raw train
+- `data/customer_churn_dataset-testing-master.csv` (3 MB) — raw test
+- `data/processed/features_engineered.csv` (35 MB) — features train
+- `data/processed/features_engineered_test.csv` (4 MB) — features test
+
+**Auth DagsHub** : stockée dans `.dvc/config.local` (gitignored). À reconfigurer sur nouvelle machine :
+```bash
+python -m dvc remote modify dagshub --local auth basic
+python -m dvc remote modify dagshub --local user emelineroblot
+python -m dvc remote modify dagshub --local password <token>
+```
+
+**Note env** : DVC installé dans Python système (3.13) — le `.venv` du projet n'a pas de pip et ne contient que python.exe. Pour Phase 5+, recréer le venv complet ou utiliser `python -m dvc` depuis Python système.
+
+---
 
 ## Résultats Phase 3 — Entraînement ✓
 

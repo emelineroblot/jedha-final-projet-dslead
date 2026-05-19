@@ -33,20 +33,22 @@ final-project-dslead/
 
 ## Roadmap (11 phases)
 
-| Phase | Intitulé | Semaine |
-|---|---|---|
-| 0 | Setup repo & environnement | S1 |
-| 1 | EDA & Preprocessing | S1 |
-| 2 | Feature Engineering | S1 |
-| 3 | Entraînement & sélection du modèle | S1–S2 |
-| 4 | MLflow + DVC — Versioning | S2 |
-| 5 | API FastAPI | S2 |
-| 6 | Containerisation Docker | S2 |
-| 7 | Pipeline CI/CD GitHub Actions | S2–S3 |
-| 8 | Orchestration Airflow | S3 |
-| 9 | Monitoring Evidently | S3–S4 |
-| 10 | Documentation & diagramme | S4 |
-| 11 | Présentation jury | S5 |
+| Phase | Intitulé | Semaine | Statut |
+|---|---|---|---|
+| 0 | Setup repo & environnement | S1 | ✓ |
+| 1 | EDA & Preprocessing | S1 | ✓ |
+| 2 | Feature Engineering | S1 | ✓ |
+| 3 | Entraînement & sélection du modèle | S1–S2 | ✓ |
+| 4 | MLflow + DVC — Versioning | S2 | ⏳ |
+| 5 | API FastAPI | S2 | ⏳ |
+| 6 | Containerisation Docker | S2 | ⏳ |
+| 7 | Pipeline CI/CD GitHub Actions | S2–S3 | ⏳ |
+| 8 | Orchestration Airflow | S3 | ⏳ |
+| 9 | Monitoring Evidently | S3–S4 | ⏳ |
+| 10 | Documentation & diagramme | S4 | ⏳ |
+| 11 | Présentation jury | S5 | ⏳ |
+
+**Branche courante** : `develop` — phases 0–3 mergées depuis `feature/training`.
 
 Détail complet dans `contexte/roadmap.md`.
 
@@ -133,7 +135,7 @@ python src/retraining/scripts/simulate_drift.py
 
 **Encodages** :
 - `Gender` : male=1, female=0
-- `Contract Length` : Monthly=0, Quarterly=1, Annual=2 — **⚠ Monthly → 100% churn, surveiller l'importance feature en Phase 3**
+- `Contract Length` : Monthly=0, Quarterly=1, Annual=2 — Monthly=100% churn dans les données brutes, mais importance XGBoost = 12.5% (non dominant, conservé)
 - `Subscription Type` : one-hot sans drop_first (non-ordinal)
 
 **Modules** :

@@ -14,10 +14,11 @@ Entraînement sur le dataset **muhammadshahidazeem** (Kaggle, 440k lignes, subsc
 
 ```
 final-project-dslead/
-├── data/                        # Données brutes rivalytics (DVC tracké)
+├── data/                        # Données brutes muhammadshahidazeem + rivalytics (archivé)
+│   └── processed/               # features_engineered.csv (train) + features_engineered_test.csv
 ├── notebooks/                   # EDA + expérimentations
 ├── src/
-│   ├── preprocessing/           # Feature engineering (agrégations sur 5 tables)
+│   ├── preprocessing/           # Pipeline flat dataset : loader → cleaner → features
 │   ├── training/                # Entraînement Scikit-learn/XGBoost + évaluation
 │   ├── api/                     # FastAPI app (POST /predict, POST /predict/batch, GET /model/info)
 │   ├── monitoring/              # Rapports Evidently (data drift + model performance)
@@ -98,15 +99,7 @@ python src/retraining/scripts/simulate_drift.py
 | Containerisation | Docker Compose (dev/prod séparés) |
 | Hébergement | Hetzner VPS |
 
-## Données rivalytics (5 tables)
-
-- **rivalytics_accounts** — 500 lignes. Target : `churn_flag` (22% True / 78% False). Clé : `account_id`. CSV dans `data/` (pas `data/raw/`).
-- **rivalytics_subscriptions** — 5 000 lignes (10/compte). `end_date` null = actif (4 514 actifs). `mrr_amount=0` = trial (778). `is_trial` déjà présent dans le CSV, ne pas recalculer. Clé de jointure avec `feature_usage` : `subscription_id`.
-- **rivalytics_feature_usage** — 25 000 lignes. **Pas de `account_id` direct** : joint via `subscription_id → subscriptions → account_id`. 40 features génériques, `error_count`, `is_beta_feature`.
-- **rivalytics_churn_events** — 600 lignes (539 hors réactivation). **Ne pas utiliser `churn_event_count` comme feature ML** : 339 comptes ont des events mais seulement 110 ont `churn_flag=True` → fuite de données garantie.
-- **rivalytics_support_tickets** — 2 000 lignes. `satisfaction_score` : 825 nulls (41%) → imputation médiane. 8 comptes sans ticket → nulls dans le merge, imputer à 0.
-
-### Données rivalytics (archivé — abandonné Phase 3)
+## Données rivalytics (archivé — abandonné Phase 3)
 
 5 tables, 500 comptes fictifs. Corrélations < 0.09, F1 max 0.52. Voir `contexte/problematiques-rencontrees.md`.
 
@@ -127,18 +120,35 @@ python src/retraining/scripts/simulate_drift.py
 - `Tenure` et `Usage Frequency` corrélations faibles (< 0.06) malgré p-values significatives (effet volume).
 - Train/test split déjà fourni — utiliser les fichiers tels quels, pas de re-split.
 
-### Preprocessing Phase 2 (nouveau dataset)
+### Feature Engineering Phase 2 — implémenté ✓
 
-1. Drop `CustomerID`
-2. `Gender` → LabelEncoder (0/1)
-3. `Subscription Type` → one-hot (Basic/Standard/Premium non-ordinal confirmé)
-4. `Contract Length` → ordinal (Monthly=0, Quarterly=1, Annual=2) **ou** exclure si fuite confirmée
-5. StandardScaler sur numériques pour LogReg
-6. 1 null par colonne (ligne malformée) → `dropna()`
+**16 features produites** (`data/processed/features_engineered.csv`) :
+
+| Type | Colonnes |
+|---|---|
+| Numériques brutes | Age, Gender (0/1), Tenure, Usage Frequency, Support Calls, Payment Delay, Contract Length (ordinal), Total Spend, Last Interaction |
+| One-hot | Subscription Type_Basic, Subscription Type_Standard, Subscription Type_Premium |
+| Dérivées | `support_intensity` = Support Calls / (Tenure+1), `spend_per_month` = Total Spend / (Tenure+1), `payment_risk_score` = Payment Delay × Support Calls |
+| Target | `churn_flag` (int 0/1) |
+
+**Encodages** :
+- `Gender` : male=1, female=0
+- `Contract Length` : Monthly=0, Quarterly=1, Annual=2 — **⚠ Monthly → 100% churn, surveiller l'importance feature en Phase 3**
+- `Subscription Type` : one-hot sans drop_first (non-ordinal)
+
+**Modules** :
+- `loader.py` : `load_train()` / `load_test()` — charge les 2 CSV bruts
+- `cleaner.py` : `clean()` — drop CustomerID, dropna, encode Gender
+- `features.py` : `engineer_features()` — features dérivées + encodages + rename target
+- `pipeline.py` : `run()` — orchestre et exporte train + test processés
+- `merger.py` : **déprécié** (dataset plat, plus de jointures)
 
 ## Architecture des modules clés
 
-- `src/preprocessing/pipeline.py` — point d'entrée : charge les 5 CSV, nettoie, joint, produit `data/processed/features_engineered.csv`
+- `src/preprocessing/pipeline.py` — point d'entrée : charge les 2 CSV muhammadshahidazeem, nettoie, produit `data/processed/features_engineered.csv` (train, 440k) et `features_engineered_test.csv` (test, 64k)
+- `src/preprocessing/loader.py` — `load_train()` / `load_test()`
+- `src/preprocessing/cleaner.py` — `clean()` : drop CustomerID, dropna, encode Gender
+- `src/preprocessing/features.py` — `engineer_features()` : 3 features dérivées + encodages + rename target
 - `src/training/train.py` — entraîne 3 modèles (LogReg, RandomForest, XGBoost), log dans MLflow, promeut le meilleur en `Production`
 - `src/training/registry.py` — fonctions `promote_model()` et `rollback_to_version(n)` via MLflow Registry
 - `src/api/main.py` — FastAPI, charge le modèle depuis MLflow Registry au démarrage

@@ -1,0 +1,49 @@
+# Environnements Python
+venv/
+.venv/
+__pycache__/
+*.pyc
+*.pyo
+*.egg-info/
+dist/
+build/
+.eggs/
+
+# Data (géré par DVC)
+data/raw/
+data/processed/
+mlruns/
+reports/
+
+# Docker
+.docker/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Claude & contexte (documents de cadrage, non versionnés)
+contexte/
+.claude/
+.mcp.json
+
+# Secrets
+.env
+.env.*
+secrets/
+
+# Logs
+*.log
+logs/
+
+# Jupyter checkpoints
+.ipynb_checkpoints/
+
+# DVC cache
+.dvc/cache/
+.dvc/tmp/

@@ -1,7 +1,7 @@
 import pandas as pd
 from pathlib import Path
 
-DATA_DIR = Path(__file__).parents[2] / "data" / "raw"
+DATA_DIR = Path(__file__).parents[2] / "data"
 
 
 def load_accounts() -> pd.DataFrame:

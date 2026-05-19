@@ -6,7 +6,9 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 **ChurnGuard** — Pipeline MLOps end-to-end de prédiction de churn pour SeoLap (projet final certification Jedha Data Science Lead).
 
-Entraînement initial sur le dataset rivalytics (Kaggle, 500 comptes SaaS fictifs), réentraînable sur les données réelles SeoLap. Les 6 composantes MLOps sont toutes obligatoires : preprocessing → modèle → API → CI/CD → monitoring → réentraînement automatisé.
+Entraînement sur le dataset **muhammadshahidazeem** (Kaggle, 440k lignes, subscription service générique), réentraînable sur les données réelles SeoLap. Les 6 composantes MLOps sont toutes obligatoires : preprocessing → modèle → API → CI/CD → monitoring → réentraînement automatisé.
+
+**Note** : le dataset rivalytics (500 comptes fictifs) a été abandonné en Phase 3 — corrélations < 0.09, F1 plafonné à 0.52. Voir `contexte/problematiques-rencontrees.md` P1.
 
 ## Structure cible du repo
 
@@ -104,13 +106,35 @@ python src/retraining/scripts/simulate_drift.py
 - **rivalytics_churn_events** — 600 lignes (539 hors réactivation). **Ne pas utiliser `churn_event_count` comme feature ML** : 339 comptes ont des events mais seulement 110 ont `churn_flag=True` → fuite de données garantie.
 - **rivalytics_support_tickets** — 2 000 lignes. `satisfaction_score` : 825 nulls (41%) → imputation médiane. 8 comptes sans ticket → nulls dans le merge, imputer à 0.
 
-### Learnings EDA (Phase 1)
+### Données rivalytics (archivé — abandonné Phase 3)
 
-- `plan_tier` non discriminant : taux de churn ~22% sur les 3 tiers.
-- `industry` et `referral_source` utiles : DevTools 31% vs Cybersecurity 16% ; event 30% vs partner 15%.
-- `tenure_days` contre-intuitif : churners médiane 381j vs non-churners 302j (artefact dataset fictif probable).
-- Corrélations brutes toutes < 0.09 → dataset synthétique ; XGBoost pour les interactions non-linéaires.
-- `error_rate` et `satisfaction_score` identiques entre classes en brut → features dérivées indispensables.
+5 tables, 500 comptes fictifs. Corrélations < 0.09, F1 max 0.52. Voir `contexte/problematiques-rencontrees.md`.
+
+## Données muhammadshahidazeem (dataset actif)
+
+- **Fichiers** : `data/customer_churn_dataset-training-master.csv` (440 832 lignes) + `data/customer_churn_dataset-testing-master.csv` (64 374 lignes)
+- **Target** : `Churn` (float 0.0/1.0). **Taux : 56.7% train / 47.4% test** — incohérence train/test à surveiller.
+- **Features** : `Age`, `Gender`, `Tenure`, `Usage Frequency`, `Support Calls`, `Payment Delay`, `Subscription Type`, `Contract Length`, `Total Spend`, `Last Interaction`
+- **Dataset plat** (1 seule table, pas de jointure)
+
+### Learnings EDA (Phase 1 — nouveau dataset)
+
+- `Support Calls` corrélation 0.574 avec Churn — feature la plus discriminante de loin.
+- `Total Spend` corrélation 0.429 (inversé : plus on dépense, plus on churne — probable artefact synthétique).
+- `Payment Delay` corrélation 0.312 — fort signal de risque.
+- `Contract Length = Monthly` → **100% churn** — fuite de données probable. À encoder avec précaution ou exclure.
+- `Subscription Type` quasi non-discriminant (55.9–58.2% sur toutes les modalités).
+- `Tenure` et `Usage Frequency` corrélations faibles (< 0.06) malgré p-values significatives (effet volume).
+- Train/test split déjà fourni — utiliser les fichiers tels quels, pas de re-split.
+
+### Preprocessing Phase 2 (nouveau dataset)
+
+1. Drop `CustomerID`
+2. `Gender` → LabelEncoder (0/1)
+3. `Subscription Type` → one-hot (Basic/Standard/Premium non-ordinal confirmé)
+4. `Contract Length` → ordinal (Monthly=0, Quarterly=1, Annual=2) **ou** exclure si fuite confirmée
+5. StandardScaler sur numériques pour LogReg
+6. 1 null par colonne (ligne malformée) → `dropna()`
 
 ## Architecture des modules clés
 
@@ -145,7 +169,7 @@ python src/retraining/scripts/simulate_drift.py
 
 ## Objectifs de performance modèle
 
-- F1-score ≥ 0,75 sur le dataset rivalytics
+- F1-score ≥ 0,75 sur le dataset muhammadshahidazeem (benchmarks publiés : XGBoost F1 > 0.80)
 - Latence API < 200ms
 - Rollback MLflow en < 5 minutes
 

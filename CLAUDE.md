@@ -177,9 +177,23 @@ python src/retraining/scripts/simulate_drift.py
 - `contexte/` et `.claude/` exclus du gitignore (documents de cadrage non versionnés)
 - Modèle MLflow Registry nommé `churnguard-model`, stage `Production` = modèle actif servi par l'API
 
+## Résultats Phase 3 — Entraînement ✓
+
+| Modèle | F1 | AUC | Threshold optimal |
+|---|---|---|---|
+| LogisticRegression | 0.885 | 0.945 | 0.45 |
+| RandomForest | 0.992 | 0.999 | 0.23 |
+| **XGBoost** | **0.999** | **1.000** | **0.15** |
+
+**Modèle en Production** : XGBoost, version 3 du registry MLflow (`churnguard-model`).
+
+**Note performances** : F1 quasi-parfait attendu sur dataset synthétique (les features reconstruisent presque parfaitement la cible). Contract Length = 12.5% de l'importance — pas la cause principale, voir P5 dans problematiques-rencontrees.md.
+
+Top features XGBoost (importance) : Total Spend (21%) > Support Calls (18%) > Contract Length (12%) > payment_risk_score (11%) > Payment Delay (10%).
+
 ## Objectifs de performance modèle
 
-- F1-score ≥ 0,75 sur le dataset muhammadshahidazeem (benchmarks publiés : XGBoost F1 > 0.80)
+- F1-score ≥ 0,75 sur le dataset muhammadshahidazeem ✓ (atteint : 0.999)
 - Latence API < 200ms
 - Rollback MLflow en < 5 minutes
 

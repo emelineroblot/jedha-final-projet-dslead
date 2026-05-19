@@ -2,37 +2,29 @@ from pathlib import Path
 
 import pandas as pd
 
-from src.preprocessing.cleaner import (
-    clean_accounts,
-    clean_churn_events,
-    clean_feature_usage,
-    clean_subscriptions,
-    clean_support_tickets,
-)
+from src.preprocessing.cleaner import clean
 from src.preprocessing.features import engineer_features
-from src.preprocessing.loader import load_all
-from src.preprocessing.merger import merge_all
+from src.preprocessing.loader import load_test, load_train
 
-OUTPUT_PATH = Path(__file__).parents[2] / "data" / "processed" / "features_engineered.csv"
+OUTPUT_TRAIN = Path(__file__).parents[2] / "data" / "processed" / "features_engineered.csv"
+OUTPUT_TEST = Path(__file__).parents[2] / "data" / "processed" / "features_engineered_test.csv"
 
 
 def run() -> pd.DataFrame:
-    raw = load_all()
+    OUTPUT_TRAIN.parent.mkdir(parents=True, exist_ok=True)
 
-    accounts = clean_accounts(raw["accounts"])
-    subscriptions = clean_subscriptions(raw["subscriptions"])
-    feature_usage = clean_feature_usage(raw["feature_usage"])
-    churn_events = clean_churn_events(raw["churn_events"])
-    support_tickets = clean_support_tickets(raw["support_tickets"])
+    train = engineer_features(clean(load_train()))
+    test  = engineer_features(clean(load_test()))
 
-    merged = merge_all(accounts, subscriptions, feature_usage, churn_events, support_tickets)
-    features = engineer_features(merged)
+    train.to_csv(OUTPUT_TRAIN, index=False)
+    test.to_csv(OUTPUT_TEST, index=False)
 
-    OUTPUT_PATH.parent.mkdir(parents=True, exist_ok=True)
-    features.to_csv(OUTPUT_PATH, index=False)
-    print(f"Features exportées : {OUTPUT_PATH} ({len(features)} lignes, {features.shape[1]} colonnes)")
+    print(f"Train : {OUTPUT_TRAIN} ({len(train):,} lignes, {train.shape[1]} colonnes)")
+    print(f"Test  : {OUTPUT_TEST} ({len(test):,} lignes, {test.shape[1]} colonnes)")
+    print(f"Taux de churn — train : {train['churn_flag'].mean():.2%} | test : {test['churn_flag'].mean():.2%}")
+    print(f"Colonnes : {list(train.columns)}")
 
-    return features
+    return train
 
 
 if __name__ == "__main__":

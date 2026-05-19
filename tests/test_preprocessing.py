@@ -26,5 +26,43 @@ def test_clean_subscriptions_flags():
 
 
 def test_feature_engineering():
-    # Placeholder — à compléter en phase 2
-    pass
+    from src.preprocessing.cleaner import (
+        clean_accounts, clean_churn_events, clean_feature_usage,
+        clean_subscriptions, clean_support_tickets,
+    )
+    from src.preprocessing.merger import merge_all
+    from src.preprocessing.features import engineer_features
+
+    raw = load_all()
+    merged = merge_all(
+        clean_accounts(raw["accounts"]),
+        clean_subscriptions(raw["subscriptions"]),
+        clean_feature_usage(raw["feature_usage"]),
+        clean_churn_events(raw["churn_events"]),
+        clean_support_tickets(raw["support_tickets"]),
+    )
+    features = engineer_features(merged)
+
+    # Toutes les features dérivées sont présentes
+    expected = [
+        "tenure_days", "error_rate", "avg_session_duration",
+        "beta_feature_ratio", "sessions_per_seat",
+        "mrr_delta", "mrr_growth_rate",
+        "escalation_rate", "tickets_per_seat",
+    ]
+    for col in expected:
+        assert col in features.columns, f"Feature manquante : {col}"
+
+    # Colonnes leakage/identifiants absentes
+    forbidden = [
+        "account_id", "account_name", "signup_date", "arr_amount", "country",
+        "churn_event_count", "churn_reason_pricing",
+    ]
+    for col in forbidden:
+        assert col not in features.columns, f"Colonne interdite présente : {col}"
+
+    # Pas de NaN sur les colonnes numériques dérivées
+    assert features[expected].isnull().sum().sum() == 0
+
+    # 500 lignes conservées (une par compte)
+    assert len(features) == 500

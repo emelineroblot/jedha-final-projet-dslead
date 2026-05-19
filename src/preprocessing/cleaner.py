@@ -7,9 +7,8 @@ def clean_accounts(df: pd.DataFrame) -> pd.DataFrame:
 
 def clean_subscriptions(df: pd.DataFrame) -> pd.DataFrame:
     df = df.copy()
-    # end_date null = abonnement actif
     df["is_active"] = df["end_date"].isna()
-    df["is_trial"] = df["mrr"] == 0
+    # is_trial déjà présent dans le CSV ; pas de re-calcul
     return df
 
 

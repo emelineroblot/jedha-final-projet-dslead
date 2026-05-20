@@ -1,3 +1,4 @@
+import logging
 import os
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
@@ -7,6 +8,8 @@ import mlflow.xgboost
 import pandas as pd
 from fastapi import FastAPI, HTTPException
 from mlflow.tracking import MlflowClient
+
+logger = logging.getLogger(__name__)
 
 from src.api.schemas import (
     BatchPredictRequest,
@@ -33,7 +36,11 @@ def _load_from_registry(model_uri: str):
 async def lifespan(app: FastAPI):
     global _model
     model_uri = f"models:/{MODEL_NAME}/{MODEL_STAGE}"
-    _model = _load_from_registry(model_uri)
+    try:
+        _model = _load_from_registry(model_uri)
+        logger.info("Modèle chargé depuis %s", model_uri)
+    except Exception as exc:
+        logger.warning("Modèle indisponible au démarrage (%s) — /predict retournera 503", exc)
     yield
     _model = None
 

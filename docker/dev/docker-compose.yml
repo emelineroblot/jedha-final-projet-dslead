@@ -1,3 +1,5 @@
+name: churnguard-dev
+
 services:
 
   postgres:
@@ -8,16 +10,19 @@ services:
       POSTGRES_DB: churnguard
     volumes:
       - postgres_data:/var/lib/postgresql/data
+      - ./init-db.sql:/docker-entrypoint-initdb.d/init-db.sql
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U churnguard"]
       interval: 5s
       retries: 5
 
   mlflow:
-    image: ghcr.io/mlflow/mlflow:v2.13.0
+    build:
+      context: ../..
+      dockerfile: Dockerfile.mlflow
     command: >
       mlflow server
-      --backend-store-uri postgresql://churnguard:churnguard@postgres:5432/churnguard
+      --backend-store-uri postgresql://churnguard:churnguard@postgres:5432/mlflow
       --default-artifact-root /mlruns
       --host 0.0.0.0
       --port 5000
@@ -34,7 +39,7 @@ services:
       context: ../..
       dockerfile: Dockerfile
     ports:
-      - "8000:8000"
+      - "8001:8000"
     environment:
       MLFLOW_TRACKING_URI: http://mlflow:5000
       MLFLOW_MODEL_NAME: churnguard-model
@@ -49,7 +54,7 @@ services:
   airflow-init:
     image: apache/airflow:2.9.1
     environment:
-      AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql+psycopg2://churnguard:churnguard@postgres:5432/churnguard
+      AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql+psycopg2://churnguard:churnguard@postgres:5432/airflow
       AIRFLOW__CORE__EXECUTOR: LocalExecutor
     command: db init
     depends_on:
@@ -61,7 +66,7 @@ services:
     ports:
       - "8080:8080"
     environment:
-      AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql+psycopg2://churnguard:churnguard@postgres:5432/churnguard
+      AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql+psycopg2://churnguard:churnguard@postgres:5432/airflow
       AIRFLOW__CORE__EXECUTOR: LocalExecutor
     volumes:
       - ../../src/retraining/dags:/opt/airflow/dags
@@ -72,7 +77,7 @@ services:
   airflow-scheduler:
     image: apache/airflow:2.9.1
     environment:
-      AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql+psycopg2://churnguard:churnguard@postgres:5432/churnguard
+      AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql+psycopg2://churnguard:churnguard@postgres:5432/airflow
       AIRFLOW__CORE__EXECUTOR: LocalExecutor
     volumes:
       - ../../src/retraining/dags:/opt/airflow/dags

@@ -40,7 +40,7 @@ final-project-dslead/
 | 2 | Feature Engineering | S1 | ✓ |
 | 3 | Entraînement & sélection du modèle | S1–S2 | ✓ |
 | 4 | MLflow + DVC — Versioning | S2 | ✓ |
-| 5 | API FastAPI | S2 | ⏳ |
+| 5 | API FastAPI | S2 | ✓ |
 | 6 | Containerisation Docker | S2 | ⏳ |
 | 7 | Pipeline CI/CD GitHub Actions | S2–S3 | ⏳ |
 | 8 | Orchestration Airflow | S3 | ⏳ |
@@ -48,7 +48,17 @@ final-project-dslead/
 | 10 | Documentation & diagramme | S4 | ⏳ |
 | 11 | Présentation jury | S5 | ⏳ |
 
-**Branche courante** : `develop` — phases 0–4 sur develop (0–3 mergées depuis `feature/training`, phase 4 committée directement).
+**Branche courante** : `develop` — phases 0–5 sur develop (0–3 mergées depuis `feature/training`, phases 4–5 committées directement).
+
+## Phase 5 — API FastAPI ✓
+
+**Endpoints** : `GET /health`, `POST /predict`, `POST /predict/batch`, `GET /model/info`
+
+**Pitfall** : MLflow logue XGBoost avec le flavor `xgboost` (pas `sklearn`). `mlflow.sklearn.load_model` échoue sur le modèle en Production. Fix : `_load_from_registry()` essaie sklearn puis xgboost en fallback (`src/api/main.py`).
+
+**Tests** : 4 tests dans `tests/test_api.py` — mock via `patch("src.api.main._load_from_registry", ...)` + `TestClient`. Lancer avec `.venv313/Scripts/python.exe -m pytest tests/test_api.py -v`
+
+**Venv** : `.venv313/` (Python 3.13, gitignored) — le `.venv/` original n'avait pas pip.
 
 Détail complet dans `contexte/roadmap.md`.
 

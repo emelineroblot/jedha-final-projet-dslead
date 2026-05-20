@@ -42,13 +42,30 @@ final-project-dslead/
 | 4 | MLflow + DVC — Versioning | S2 | ✓ |
 | 5 | API FastAPI | S2 | ✓ |
 | 6 | Containerisation Docker | S2 | ✓ |
-| 7 | Pipeline CI/CD GitHub Actions | S2–S3 | ⏳ |
+| 7 | Pipeline CI/CD GitHub Actions | S2–S3 | ✓ |
 | 8 | Orchestration Airflow | S3 | ⏳ |
 | 9 | Monitoring Evidently | S3–S4 | ⏳ |
 | 10 | Documentation & diagramme | S4 | ⏳ |
 | 11 | Présentation jury | S5 | ⏳ |
 
-**Branche courante** : `develop` — phases 0–6 sur develop (0–3 mergées depuis `feature/training`, phases 4–6 committées directement).
+**Branche courante** : `develop` — phases 0–7 sur develop (0–3 mergées depuis `feature/training`, phases 4–7 committées directement).
+
+## Phase 7 — CI/CD GitHub Actions ✓
+
+**Fichier** : `.github/workflows/ci.yml`
+
+**Jobs** :
+- `test` : lint ruff + `pytest tests/test_api.py` — install légère (`requirements-api.txt` + pytest/ruff), pas d'airflow ni dvc
+- `build` : build image Docker + push GHCR (`ghcr.io/<org>/churnguard-api`) — tags `branch` + `branch-<sha>`
+- `deploy` : désactivé (`if: false`) — à activer Phase 10 après config secrets Hetzner
+
+**Triggers** : push sur `develop` ou `main`, PR vers `main`
+
+**Pitfall P14** : `test_preprocessing.py` cible l'ancien code rivalytics (5 tables, `load_all()`) — exclu du pipeline CI. À réécrire pour le dataset muhammadshahidazeem avant réactivation.
+
+**Pitfall P15** : `pip install -e ".[dev]"` installe apache-airflow → build CI > 5 min. Toujours utiliser `requirements-api.txt` pour les jobs de test.
+
+---
 
 ## Phase 6 — Containerisation Docker ✓
 

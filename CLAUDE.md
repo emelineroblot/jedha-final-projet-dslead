@@ -43,12 +43,12 @@ final-project-dslead/
 | 5 | API FastAPI | S2 | ✓ |
 | 6 | Containerisation Docker | S2 | ✓ |
 | 7 | Pipeline CI/CD GitHub Actions | S2–S3 | ✓ |
-| 8 | Orchestration Airflow | S3 | ⏳ |
-| 9 | Monitoring Evidently | S3–S4 | ⏳ |
+| 8 | Orchestration Airflow | S3 | ✓ |
+| 9 | Monitoring Evidently | S3–S4 | ✓ |
 | 10 | Documentation & diagramme | S4 | ⏳ |
 | 11 | Présentation jury | S5 | ⏳ |
 
-**Branche courante** : `develop` — phases 0–7 sur develop (0–3 mergées depuis `feature/training`, phases 4–7 committées directement).
+**Branche courante** : `develop` — phases 0–9 sur develop (0–3 mergées depuis `feature/training`, phases 4–9 committées directement).
 
 ## Phase 7 — CI/CD GitHub Actions ✓
 
@@ -64,6 +64,41 @@ final-project-dslead/
 **Pitfall P14** : `test_preprocessing.py` cible l'ancien code rivalytics (5 tables, `load_all()`) — exclu du pipeline CI. À réécrire pour le dataset muhammadshahidazeem avant réactivation.
 
 **Pitfall P15** : `pip install -e ".[dev]"` installe apache-airflow → build CI > 5 min. Toujours utiliser `requirements-api.txt` pour les jobs de test.
+
+---
+
+## Phase 9 — Monitoring Evidently ✓
+
+**Fichiers** :
+- `src/monitoring/drift_report.py` — `generate_drift_report(reference, current, target_column=None, prediction_column=None)` : DataDriftPreset obligatoire, ClassificationPreset conditionnel si prediction_column fourni
+- `src/monitoring/alert.py` — `check_drift()` : génère le rapport si absent (données train vs test ou drifted), parse le JSON Evidently, retourne `True` si `drift_share > 0.2` ou F1 drop `> 0.05`
+
+**Déclenchement de la démo** :
+```bash
+# 1. Injecter une dérive artificielle
+python src/retraining/scripts/simulate_drift.py --noise 0.3
+
+# 2. Vérifier que la dérive est détectée
+python -c "from src.monitoring.alert import check_drift; print(check_drift())"
+```
+
+**Pitfall P16** : `as_dict()` d'Evidently encode le nom de la metric sous la clé `"metric"` (ex: `"DatasetDriftMetric"`). Pour parser, tester `"DatasetDrift" in metric_name` (substring) plutôt que l'égalité stricte — le nom exact peut varier selon la version d'Evidently.
+
+---
+
+## Phase 8 — Orchestration Airflow ✓
+
+**DAGs** :
+- `src/retraining/dags/batch_scoring_dag.py` — schedule `0 2 * * *` : charge le CSV test (500 premières lignes en démo), appelle `/predict/batch` par chunks de 100, simule l'envoi Mautic
+- `src/retraining/dags/retraining_dag.py` — schedule `0 3 * * 1` (lundi 3h) : `check_drift` (BranchPythonOperator) → `retrain_model` (`auto_promote=False`) → `evaluate_model` (F1 candidat vs Production via XCom) → `promote_or_rollback`
+
+**Variables d'environnement Airflow** :
+- `CHURNGUARD_API_URL` : URL de l'API (défaut `http://api:8000` dans le conteneur Docker)
+- `MLFLOW_TRACKING_URI` : doit pointer vers le serveur MLflow (configuré dans docker-compose.yml)
+
+**Pitfall P17** : `train(auto_promote=False)` enregistre le modèle dans le Registry sans le transitionner en Production — indispensable pour que `evaluate_model` puisse comparer candidat vs Production courante avant de décider.
+
+**Pitfall P18** : XCom Airflow est limité à ~48 KB. Ne jamais passer de DataFrames par XCom — toujours passer des chemins de fichiers ou des identifiants (run_id, version).
 
 ---
 

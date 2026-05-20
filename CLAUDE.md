@@ -28,7 +28,7 @@ final-project-dslead/
 │   ├── dev/docker-compose.yml
 │   └── prod/docker-compose.yml
 ├── .github/workflows/           # CI/CD GitHub Actions
-└── mlruns/                      # MLflow (gitignored — sera DVC-tracké en Phase 5)
+└── mlruns/                      # MLflow (gitignored — non versionné par DVC)
 ```
 
 ## Roadmap (11 phases)
@@ -77,14 +77,14 @@ python -m src.preprocessing.pipeline
 # Entraîner le modèle
 python -m src.training.train
 
-# Lancer les tests
-pytest tests/
+# Lancer les tests (venv313 requis)
+.venv313/Scripts/python.exe -m pytest tests/ -v
 
 # Lancer un test précis
-pytest tests/test_preprocessing.py::test_feature_engineering -v
+.venv313/Scripts/python.exe -m pytest tests/test_preprocessing.py::test_feature_engineering -v
 
 # Linter
-ruff check src/
+.venv313/Scripts/python.exe -m ruff check src/
 
 # DVC
 dvc pull        # récupérer les données
@@ -206,7 +206,7 @@ python -m dvc remote modify dagshub --local user emelineroblot
 python -m dvc remote modify dagshub --local password <token>
 ```
 
-**Note env** : DVC installé dans Python système (3.13) — le `.venv` du projet n'a pas de pip et ne contient que python.exe. Pour Phase 5+, recréer le venv complet ou utiliser `python -m dvc` depuis Python système.
+**Note env** : DVC installé dans Python système (3.13). Le `.venv` original n'avait pas pip — remplacé par `.venv313/` (Python 3.13, toutes dépendances installées). Voir P7 + P9 dans `contexte/problematiques-rencontrees.md`.
 
 ---
 

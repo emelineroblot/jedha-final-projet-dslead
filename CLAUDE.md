@@ -82,7 +82,7 @@ python src/retraining/scripts/simulate_drift.py --noise 0.3
 python -c "from src.monitoring.alert import check_drift; print(check_drift())"
 ```
 
-**Pitfall P16** : `as_dict()` d'Evidently encode le nom de la metric sous la clé `"metric"` (ex: `"DatasetDriftMetric"`). Pour parser, tester `"DatasetDrift" in metric_name` (substring) plutôt que l'égalité stricte — le nom exact peut varier selon la version d'Evidently.
+**Pitfall P17** : `as_dict()` d'Evidently encode le nom de la metric sous la clé `"metric"` (ex: `"DatasetDriftMetric"`). Pour parser, tester `"DatasetDrift" in metric_name` (substring) plutôt que l'égalité stricte — le nom exact peut varier selon la version d'Evidently.
 
 ---
 
@@ -96,9 +96,9 @@ python -c "from src.monitoring.alert import check_drift; print(check_drift())"
 - `CHURNGUARD_API_URL` : URL de l'API (défaut `http://api:8000` dans le conteneur Docker)
 - `MLFLOW_TRACKING_URI` : doit pointer vers le serveur MLflow (configuré dans docker-compose.yml)
 
-**Pitfall P17** : `train(auto_promote=False)` enregistre le modèle dans le Registry sans le transitionner en Production — indispensable pour que `evaluate_model` puisse comparer candidat vs Production courante avant de décider.
+**Pitfall P18** : `train(auto_promote=False)` enregistre le modèle dans le Registry sans le transitionner en Production — indispensable pour que `evaluate_model` puisse comparer candidat vs Production courante avant de décider.
 
-**Pitfall P18** : XCom Airflow est limité à ~48 KB. Ne jamais passer de DataFrames par XCom — toujours passer des chemins de fichiers ou des identifiants (run_id, version).
+**Pitfall P19** : XCom Airflow est limité à ~48 KB. Ne jamais passer de DataFrames par XCom — toujours passer des chemins de fichiers ou des identifiants (run_id, version).
 
 ---
 

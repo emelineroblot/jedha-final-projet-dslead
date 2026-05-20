@@ -9,8 +9,6 @@ import pandas as pd
 from fastapi import FastAPI, HTTPException
 from mlflow.tracking import MlflowClient
 
-logger = logging.getLogger(__name__)
-
 from src.api.schemas import (
     BatchPredictRequest,
     BatchPredictResponse,
@@ -18,6 +16,8 @@ from src.api.schemas import (
     PredictRequest,
     PredictResponse,
 )
+
+logger = logging.getLogger(__name__)
 
 MODEL_NAME = os.getenv("MLFLOW_MODEL_NAME", "churnguard-model")
 MODEL_STAGE = os.getenv("MLFLOW_MODEL_STAGE", "Production")

@@ -11,7 +11,7 @@ logger = logging.getLogger(__name__)
 
 def check_drift(report_path: Path = REPORT_PATH) -> bool:
     with open(report_path) as f:
-        report = json.load(f)
+        _ = json.load(f)
 
     # TODO: extraire les métriques selon la structure Evidently réelle
     drift_detected = False

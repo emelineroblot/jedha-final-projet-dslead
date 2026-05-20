@@ -59,7 +59,7 @@ def _log_model(name: str, model) -> None:
         mlflow.sklearn.log_model(model, artifact_path="model")
 
 
-def train() -> None:
+def train(auto_promote: bool = True):
     df = pd.read_csv(DATA_PATH)
     X = df.drop(columns=[TARGET])
     y = df[TARGET].astype(int)
@@ -102,12 +102,18 @@ def train() -> None:
                 best_run_id = run.info.run_id
 
     if best_run_id and best_f1 >= F1_PROMOTION_THRESHOLD:
-        promote_model(run_id=best_run_id, stage="Production")
-        print(f"\nModèle promu en Production (F1={best_f1:.3f})")
+        if auto_promote:
+            promote_model(run_id=best_run_id, stage="Production")
+            print(f"\nModèle promu en Production (F1={best_f1:.3f})")
+        else:
+            mlflow.register_model(f"runs:/{best_run_id}/model", MODEL_NAME)
+            print(f"\nModèle enregistré sans promotion (F1={best_f1:.3f})")
     elif best_run_id:
         print(f"\nF1={best_f1:.3f} < seuil {F1_PROMOTION_THRESHOLD} — pas de promotion automatique")
         model_uri = f"runs:/{best_run_id}/model"
         mlflow.register_model(model_uri, MODEL_NAME)
+
+    return best_run_id
 
 
 if __name__ == "__main__":

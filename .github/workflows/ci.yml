@@ -2,7 +2,7 @@ name: CI/CD ChurnGuard
 
 on:
   push:
-    branches: [develop]
+    branches: [develop, main]
   pull_request:
     branches: [main]
 
@@ -19,17 +19,18 @@ jobs:
         with:
           python-version: "3.11"
       - name: Install dependencies
-        run: pip install -e ".[dev]"
+        run: pip install -r requirements-api.txt pytest pytest-asyncio ruff httpx
       - name: Lint
         run: ruff check src/
       - name: Tests
-        run: pytest tests/ -v
+        run: pytest tests/test_api.py -v
 
   build:
     needs: test
     runs-on: ubuntu-latest
-    outputs:
-      image_tag: ${{ steps.meta.outputs.tags }}
+    permissions:
+      contents: read
+      packages: write
     steps:
       - uses: actions/checkout@v4
       - name: Log in to GHCR
@@ -43,15 +44,21 @@ jobs:
         uses: docker/metadata-action@v5
         with:
           images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+          tags: |
+            type=ref,event=branch
+            type=sha,prefix={{branch}}-
       - name: Build and push
         uses: docker/build-push-action@v5
         with:
+          context: .
           push: true
           tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
 
+  # Activé Phase 10 — nécessite secrets HETZNER_HOST + HETZNER_SSH_KEY
   deploy:
     needs: build
-    if: github.ref == 'refs/heads/develop'
+    if: false
     runs-on: ubuntu-latest
     steps:
       - name: Deploy to Hetzner

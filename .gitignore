@@ -1,6 +1,7 @@
 # Environnements Python
 venv/
 .venv/
+.venv313/
 __pycache__/
 *.pyc
 *.pyo

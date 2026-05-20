@@ -1,9 +1,12 @@
 import os
 from contextlib import asynccontextmanager
+from datetime import datetime, timezone
 
 import mlflow.sklearn
+import mlflow.xgboost
 import pandas as pd
 from fastapi import FastAPI, HTTPException
+from mlflow.tracking import MlflowClient
 
 from src.api.schemas import (
     BatchPredictRequest,
@@ -19,11 +22,18 @@ MODEL_STAGE = os.getenv("MLFLOW_MODEL_STAGE", "Production")
 _model = None
 
 
+def _load_from_registry(model_uri: str):
+    try:
+        return mlflow.sklearn.load_model(model_uri)
+    except Exception:
+        return mlflow.xgboost.load_model(model_uri)
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     global _model
     model_uri = f"models:/{MODEL_NAME}/{MODEL_STAGE}"
-    _model = mlflow.sklearn.load_model(model_uri)
+    _model = _load_from_registry(model_uri)
     yield
     _model = None
 
@@ -82,12 +92,20 @@ def predict_batch(request: BatchPredictRequest):
 
 @app.get("/model/info", response_model=ModelInfoResponse)
 def model_info():
-    # TODO: enrichir avec les métriques MLflow réelles
+    client = MlflowClient()
+    versions = client.get_latest_versions(MODEL_NAME, stages=[MODEL_STAGE])
+    if not versions:
+        raise HTTPException(status_code=404, detail=f"Aucune version en stage '{MODEL_STAGE}'")
+    v = versions[0]
+    run = client.get_run(v.run_id)
+    metrics = {k: float(val) for k, val in run.data.metrics.items()}
+    trained_at = datetime.fromtimestamp(v.creation_timestamp / 1000, tz=timezone.utc).isoformat()
+    feature_count = int(_model.n_features_in_) if _model is not None and hasattr(_model, "n_features_in_") else 0
     return ModelInfoResponse(
         model_name=MODEL_NAME,
-        version="1",
+        version=v.version,
         stage=MODEL_STAGE,
-        metrics={},
-        trained_at="",
-        feature_count=0,
+        metrics=metrics,
+        trained_at=trained_at,
+        feature_count=feature_count,
     )

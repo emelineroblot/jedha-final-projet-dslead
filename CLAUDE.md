@@ -41,14 +41,44 @@ final-project-dslead/
 | 3 | Entraînement & sélection du modèle | S1–S2 | ✓ |
 | 4 | MLflow + DVC — Versioning | S2 | ✓ |
 | 5 | API FastAPI | S2 | ✓ |
-| 6 | Containerisation Docker | S2 | ⏳ |
+| 6 | Containerisation Docker | S2 | ✓ |
 | 7 | Pipeline CI/CD GitHub Actions | S2–S3 | ⏳ |
 | 8 | Orchestration Airflow | S3 | ⏳ |
 | 9 | Monitoring Evidently | S3–S4 | ⏳ |
 | 10 | Documentation & diagramme | S4 | ⏳ |
 | 11 | Présentation jury | S5 | ⏳ |
 
-**Branche courante** : `develop` — phases 0–5 sur develop (0–3 mergées depuis `feature/training`, phases 4–5 committées directement).
+**Branche courante** : `develop` — phases 0–6 sur develop (0–3 mergées depuis `feature/training`, phases 4–6 committées directement).
+
+## Phase 6 — Containerisation Docker ✓
+
+**Fichiers** :
+- `Dockerfile` — single-stage Python 3.11-slim, installe depuis `requirements-api.txt` uniquement
+- `Dockerfile.mlflow` — `ghcr.io/mlflow/mlflow:v2.13.0` + `psycopg2-binary` (absent de l'image officielle)
+- `.dockerignore` — exclut `data/`, `mlruns/`, `.venv313/`, `notebooks/` du contexte de build
+- `requirements-api.txt` — 8 dépendances API seulement (pas airflow, pas dvc)
+- `docker/dev/init-db.sql` — crée les bases `mlflow` et `airflow` au premier démarrage PostgreSQL
+
+**Pitfalls** : voir P10–P13 dans `contexte/problematiques-rencontrees.md`.
+
+**Ports dev** (attention : SeoLap tourne déjà sur 8000) :
+- API → `localhost:8001` (conteneur écoute 8000, mappage 8001:8000)
+- MLflow → `localhost:5000`
+- Airflow → `localhost:8080`
+
+**Commandes** :
+```bash
+# Démarrer la stack dev
+docker compose -f docker/dev/docker-compose.yml up -d
+
+# Arrêter et supprimer les volumes (reset complet)
+docker compose -f docker/dev/docker-compose.yml down -v
+
+# Rebuild uniquement l'API après modif src/
+docker compose -f docker/dev/docker-compose.yml up -d --build api
+```
+
+---
 
 ## Phase 5 — API FastAPI ✓
 
@@ -173,13 +203,15 @@ python src/retraining/scripts/simulate_drift.py
 
 ## Services Docker (stack dev)
 
-| Service | Port | Rôle |
+| Service | Port hôte | Rôle |
 |---|---|---|
-| `api` | 8000 | FastAPI — endpoints /predict, /predict/batch, /model/info, /health |
+| `api` | **8001** | FastAPI — endpoints /predict, /predict/batch, /model/info, /health |
 | `mlflow` | 5000 | MLflow Tracking Server + Model Registry |
 | `airflow-webserver` | 8080 | Airflow UI |
 | `airflow-scheduler` | — | Exécution des DAGs |
-| `postgres` | 5432 | Backend Airflow + MLflow |
+| `postgres` | 5432 | Serveur PostgreSQL — 3 bases : `churnguard`, `mlflow`, `airflow` |
+
+**Note** : port 8001 (et non 8000) — SeoLap occupe déjà le port 8000 sur cette machine. À ajuster si déployé sur un serveur dédié.
 
 ## Conventions
 

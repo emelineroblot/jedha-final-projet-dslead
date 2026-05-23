@@ -1,0 +1,19 @@
+FROM python:3.11-slim
+
+WORKDIR /app
+
+COPY requirements-api.txt .
+RUN pip install --no-cache-dir -r requirements-api.txt joblib
+
+COPY src/ ./src/
+COPY model_artifacts/ ./model_artifacts/
+COPY pyproject.toml .
+
+RUN pip install --no-cache-dir -e . --no-deps
+
+ENV MODEL_PATH=/app/model_artifacts/model.joblib
+ENV PYTHONUNBUFFERED=1
+
+EXPOSE 7860
+
+CMD ["uvicorn", "src.api.main:app", "--host", "0.0.0.0", "--port", "7860"]

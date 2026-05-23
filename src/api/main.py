@@ -1,7 +1,9 @@
+import json
 import logging
 import os
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
+from pathlib import Path
 
 import mlflow.sklearn
 import mlflow.xgboost
@@ -21,8 +23,14 @@ logger = logging.getLogger(__name__)
 
 MODEL_NAME = os.getenv("MLFLOW_MODEL_NAME", "churnguard-model")
 MODEL_STAGE = os.getenv("MLFLOW_MODEL_STAGE", "Production")
+MODEL_PATH = os.getenv("MODEL_PATH")  # si défini, charge depuis fichier (mode standalone HF)
 
 _model = None
+
+
+def _load_from_file(path: str):
+    import joblib
+    return joblib.load(path)
 
 
 def _load_from_registry(model_uri: str):
@@ -35,12 +43,16 @@ def _load_from_registry(model_uri: str):
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     global _model
-    model_uri = f"models:/{MODEL_NAME}/{MODEL_STAGE}"
     try:
-        _model = _load_from_registry(model_uri)
-        logger.info("Modèle chargé depuis %s", model_uri)
+        if MODEL_PATH:
+            _model = _load_from_file(MODEL_PATH)
+            logger.info("Modele charge depuis fichier : %s", MODEL_PATH)
+        else:
+            model_uri = f"models:/{MODEL_NAME}/{MODEL_STAGE}"
+            _model = _load_from_registry(model_uri)
+            logger.info("Modele charge depuis MLflow : %s", model_uri)
     except Exception as exc:
-        logger.warning("Modèle indisponible au démarrage (%s) — /predict retournera 503", exc)
+        logger.warning("Modele indisponible au demarrage (%s) — /predict retournera 503", exc)
     yield
     _model = None
 
@@ -99,6 +111,24 @@ def predict_batch(request: BatchPredictRequest):
 
 @app.get("/model/info", response_model=ModelInfoResponse)
 def model_info():
+    # Mode standalone (HF Spaces) : lecture depuis model_info.json
+    if MODEL_PATH:
+        info_path = Path(MODEL_PATH).parent / "model_info.json"
+        if not info_path.exists():
+            raise HTTPException(status_code=404, detail="model_info.json introuvable")
+        with open(info_path) as f:
+            info = json.load(f)
+        feature_count = int(_model.n_features_in_) if _model is not None and hasattr(_model, "n_features_in_") else info.get("feature_count", 0)
+        return ModelInfoResponse(
+            model_name=info["model_name"],
+            version=info["version"],
+            stage=info["stage"],
+            metrics=info["metrics"],
+            trained_at=info["trained_at"],
+            feature_count=feature_count,
+        )
+
+    # Mode MLflow
     client = MlflowClient()
     versions = client.get_latest_versions(MODEL_NAME, stages=[MODEL_STAGE])
     if not versions:

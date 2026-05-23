@@ -16,6 +16,9 @@ mlruns/
 reports/*.html
 reports/*.json
 
+# Artefacts modèle exportés (poussés sur HF Space, pas dans le repo principal)
+model_artifacts/
+
 # Docker
 .docker/
 

@@ -29,8 +29,6 @@ hf-demo/
 # Exports SeoLap (données utilisateurs — non versionnées)
 exports/
 
-# Screenshots (captures locales, non versionnées)
-screens/
 
 # Docker
 .docker/

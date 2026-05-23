@@ -12,6 +12,7 @@ build/
 
 # Data (géré par DVC — les .dvc pointer files sont committés, pas les données)
 data/*.csv
+data/**/*.csv
 mlruns/
 reports/*.html
 reports/*.json
@@ -27,6 +28,9 @@ hf-demo/
 
 # Exports SeoLap (données utilisateurs — non versionnées)
 exports/
+
+# Screenshots (captures locales, non versionnées)
+screens/
 
 # Docker
 .docker/

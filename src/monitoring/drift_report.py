@@ -3,9 +3,9 @@ from pathlib import Path
 from typing import Optional
 
 import pandas as pd
-from evidently import ColumnMapping
-from evidently.metric_preset import ClassificationPreset, DataDriftPreset
-from evidently.report import Report
+from evidently.legacy.metric_preset import ClassificationPreset, DataDriftPreset
+from evidently.legacy.pipeline.column_mapping import ColumnMapping
+from evidently.legacy.report import Report
 
 REPORTS_DIR = Path(__file__).parents[2] / "reports"
 

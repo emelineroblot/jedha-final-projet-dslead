@@ -1,0 +1,77 @@
+name: churnguard-prod
+
+services:
+
+  postgres:
+    image: postgres:15
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    restart: always
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER}"]
+      interval: 10s
+      retries: 5
+
+  mlflow:
+    image: ghcr.io/mlflow/mlflow:v2.13.0
+    command: >
+      mlflow server
+      --backend-store-uri postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
+      --default-artifact-root /mlruns
+      --host 0.0.0.0
+      --port 5000
+    volumes:
+      - mlruns:/mlruns
+    restart: always
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  api:
+    image: ${API_IMAGE}
+    ports:
+      - "8000:8000"
+    environment:
+      MLFLOW_TRACKING_URI: http://mlflow:5000
+      MLFLOW_MODEL_NAME: churnguard-model
+      MLFLOW_MODEL_STAGE: Production
+    restart: always
+    depends_on:
+      - mlflow
+
+  airflow-webserver:
+    image: apache/airflow:2.9.1
+    ports:
+      - "8080:8080"
+    environment:
+      AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql+psycopg2://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
+      AIRFLOW__CORE__EXECUTOR: LocalExecutor
+    volumes:
+      - airflow_dags:/opt/airflow/dags
+    restart: always
+    depends_on:
+      postgres:
+        condition: service_healthy
+    command: webserver
+
+  airflow-scheduler:
+    image: apache/airflow:2.9.1
+    environment:
+      AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql+psycopg2://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
+      AIRFLOW__CORE__EXECUTOR: LocalExecutor
+    volumes:
+      - airflow_dags:/opt/airflow/dags
+    restart: always
+    depends_on:
+      postgres:
+        condition: service_healthy
+    command: scheduler
+
+volumes:
+  postgres_data:
+  mlruns:
+  airflow_dags:

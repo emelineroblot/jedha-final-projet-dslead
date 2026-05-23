@@ -1,6 +1,7 @@
 # Environnements Python
 venv/
 .venv/
+.venv313/
 __pycache__/
 *.pyc
 *.pyo
@@ -9,11 +10,25 @@ dist/
 build/
 .eggs/
 
-# Data (géré par DVC)
-data/raw/
-data/processed/
+# Data (géré par DVC — les .dvc pointer files sont committés, pas les données)
+data/*.csv
+data/**/*.csv
 mlruns/
-reports/
+reports/*.html
+reports/*.json
+
+# Artefacts modèle exportés (poussés sur HF Space, pas dans le repo principal)
+model_artifacts/
+
+# Repos HF Spaces (git imbriqués, gérés séparément)
+hf-space/
+hf-mlflow/
+hf-airflow/
+hf-demo/
+
+# Exports SeoLap (données utilisateurs — non versionnées)
+exports/
+
 
 # Docker
 .docker/

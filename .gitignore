@@ -19,6 +19,9 @@ reports/*.json
 # Artefacts modèle exportés (poussés sur HF Space, pas dans le repo principal)
 model_artifacts/
 
+# Repo HF Space (git imbriqué, géré séparément)
+hf-space/
+
 # Docker
 .docker/
 

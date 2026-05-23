@@ -100,6 +100,12 @@ python -c "from src.monitoring.alert import check_drift; print(check_drift())"
 
 **Pitfall P19** : XCom Airflow est limité à ~48 KB. Ne jamais passer de DataFrames par XCom — toujours passer des chemins de fichiers ou des identifiants (run_id, version).
 
+**Pitfall P20** : MLflow client 3.x appelle `/api/2.0/mlflow/logged-models` (endpoint inexistant en 2.x). `Dockerfile.mlflow` doit utiliser la même version majeure que le client local. Vérifier avec `python -c "import mlflow; print(mlflow.__version__)"` et aligner le Dockerfile en conséquence. Actuellement : client = serveur = **3.12.0** (`python:3.11-slim` + `pip install mlflow==3.12.0`).
+
+**Pitfall P21** : Entraîner avec `MLFLOW_TRACKING_URI=http://localhost:5000` via PowerShell (`$env:MLFLOW_TRACKING_URI = "..."`) — ne pas utiliser le Bash tool pour les variables d'env sur Windows (syntaxe ignorée silencieusement). Sans cette variable, MLflow écrit en local (`mlruns/`) et le serveur Docker reste vide.
+
+**Pitfall P22** : `ColumnMapping` d'Evidently a été déplacé dans `evidently.legacy.pipeline.column_mapping` en version 0.7.x. Les imports `from evidently import ColumnMapping` et `from evidently.metric_preset import DataDriftPreset` sont cassés — utiliser `from evidently.legacy.pipeline.column_mapping import ColumnMapping` et `from evidently.legacy.metric_preset import DataDriftPreset`.
+
 ---
 
 ## Phase 6 — Containerisation Docker ✓

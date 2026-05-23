@@ -23,6 +23,10 @@ model_artifacts/
 hf-space/
 hf-mlflow/
 hf-airflow/
+hf-demo/
+
+# Exports SeoLap (données utilisateurs — non versionnées)
+exports/
 
 # Docker
 .docker/

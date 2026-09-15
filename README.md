@@ -47,6 +47,29 @@ flowchart LR
 
 ---
 
+## Live Demo
+
+The Streamlit demo connects to the ChurnGuard API and simulates a SeoLap CRM dashboard with churn scoring.
+
+**HuggingFace Space:** https://huggingface.co/spaces/emeliner/churnguard-demo
+
+**Run locally:**
+
+```bash
+pip install streamlit pandas requests
+streamlit run demo/app.py
+```
+
+> Requires the API to be running on `http://localhost:8001`.
+
+### Screenshots
+
+| Streamlit Dashboard | MLflow Experiments | Airflow DAGs | API Swagger |
+|---|---|---|---|
+| ![Demo](screens/screencapture-emeliner-churnguard-demo-hf-space-2026-05-23-12_58_16.png) | ![MLflow](screens/screencapture-localhost-5000-2026-05-23-09_42_44.png) | ![Airflow](screens/screencapture-localhost-8080-home-2026-05-23-08_30_39.png) | ![Swagger](screens/screencapture-localhost-8001-docs-2026-05-23-08_29_21.png) |
+
+---
+
 ## Stack
 
 | Component | Tool | Version |
@@ -421,9 +444,16 @@ final-project-dslead/
 ├── docker/
 │   ├── dev/docker-compose.yml
 │   └── prod/docker-compose.yml
+├── demo/
+│   ├── app.py               # Streamlit dashboard
+│   ├── api.py               # API client helpers
+│   ├── data.py              # Sample data & feature constants
+│   └── requirements.txt
+├── screens/                 # Stack screenshots (MLflow, Airflow, API, demo)
 ├── .github/workflows/ci.yml
 ├── Dockerfile
 ├── Dockerfile.mlflow
+├── Dockerfile.hf            # HuggingFace Space deployment
 ├── requirements-api.txt
 └── pyproject.toml
 ```

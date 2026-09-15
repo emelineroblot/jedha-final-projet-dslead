@@ -45,6 +45,7 @@ Thumbs.db
 # Claude & contexte (documents de cadrage, non versionnés)
 contexte/
 .claude/
+docs/
 .mcp.json
 
 # Secrets

@@ -48,7 +48,7 @@ final-project-dslead/
 | 10 | Documentation & diagramme | S4 | ⏳ |
 | 11 | Présentation jury | S5 | ⏳ |
 
-**Branche courante** : `develop` — phases 0–9 sur develop (0–3 mergées depuis `feature/training`, phases 4–9 committées directement).
+**Workflow git** : `main` + `feature/*` uniquement (branche `develop` supprimée le 2026-09-15 — phases 0–10 mergées dans `main`). Une feature = une branche `feature/nom-court`, mergée dans `main` une fois validée.
 
 ## Phase 7 — CI/CD GitHub Actions ✓
 

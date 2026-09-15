@@ -67,3 +67,13 @@ logs/
 .dvc/cache/
 .dvc/tmp/
 /model_artifacts
+
+# Overrides compose locaux (build args machine-spécifiques, ex. Avast)
+docker/**/docker-compose.override.yml
+
+# Overrides compose locaux (build args machine-spécifiques, ex. Avast) — garder le .example
+docker/**/docker-compose.override.yml
+
+# Wheels pré-téléchargés pour les builds Docker hors-ligne (voir P33) — dossier vide en CI
+wheels/*
+!wheels/.gitkeep

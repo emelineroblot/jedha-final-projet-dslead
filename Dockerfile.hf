@@ -3,6 +3,10 @@ FROM python:3.11-slim
 # libgomp1 : runtime OpenMP requis par XGBoost
 RUN apt-get update && apt-get install -y --no-install-recommends libgomp1 && rm -rf /var/lib/apt/lists/*
 
+# Réseau avec inspection TLS (Avast, proxy d'entreprise) : passer --build-arg PIP_TRUSTED_HOST="pypi.org files.pythonhosted.org"
+# (vide par défaut → pip vérifie normalement les certificats, comme en CI)
+ARG PIP_TRUSTED_HOST=""
+ENV PIP_TRUSTED_HOST=${PIP_TRUSTED_HOST} PIP_DEFAULT_TIMEOUT=180 PIP_RETRIES=10
 WORKDIR /app
 
 COPY requirements-api.txt .

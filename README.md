@@ -105,6 +105,8 @@ Télécharge les CSV bruts (25 MB), les features (`features_engineered.csv`, `fe
 docker compose -f docker/dev/docker-compose.yml up -d --build
 ```
 
+> Réseau avec inspection TLS (antivirus type Avast, proxy d'entreprise) : `pip` échoue dans les conteneurs avec `CERTIFICATE_VERIFY_FAILED`. Copier `docker/dev/docker-compose.override.yml.example` en `docker-compose.override.yml` et ajouter `-f docker/dev/docker-compose.override.yml` aux commandes compose (build-arg `PIP_TRUSTED_HOST`).
+
 | Service | URL | Identifiants |
 |---|---|---|
 | API + Swagger | http://localhost:8001/docs | — |

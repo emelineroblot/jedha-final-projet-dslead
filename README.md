@@ -1,489 +1,313 @@
 # ChurnGuard — End-to-End MLOps Pipeline
 
-**Jedha Data Science Lead — Final Project**
+**Jedha Data Science Lead — projet final**
 
-ChurnGuard is a production-grade MLOps pipeline that predicts customer churn risk, exposes predictions via a REST API, and continuously monitors and retrains the model when data drift is detected.
+ChurnGuard prédit le risque de churn des comptes d'un SaaS (SeoLap), expose les scores via une API REST, **surveille la dérive des données en production et se réentraîne automatiquement** quand le modèle décroche — avec promotion ou rollback sans intervention humaine.
 
-Trained on the **muhammadshahidazeem** dataset (440k rows, Kaggle), the pipeline is designed to be retrained on real SeoLap SaaS data as soon as sufficient volume is available.
+Entraîné sur le dataset Kaggle **muhammadshahidazeem** (440 k lignes), conçu pour être réentraîné sur les données réelles SeoLap.
 
----
+![Architecture](docs/architecture/01-architecture-globale.svg)
 
-## Architecture
-
-```mermaid
-flowchart LR
-    subgraph Data
-        A[Raw CSV\n440k rows] -->|src/preprocessing| B[Feature Engineering\n15 features]
-    end
-
-    subgraph Training
-        B -->|src/training/train.py| C[XGBoost / RandomForest\n/ LogisticRegression]
-        C -->|MLflow tracking| D[(MLflow Registry\nchurnguard-model)]
-    end
-
-    subgraph Serving
-        D -->|Production stage| E[FastAPI\nPOST /predict\nPOST /predict/batch\nGET /model/info]
-        E --> F[Docker Container\nport 8001]
-    end
-
-    subgraph CI_CD["CI / CD"]
-        G[GitHub Push] -->|GitHub Actions| H{test → build → push}
-        H --> F
-    end
-
-    subgraph Monitoring
-        F -->|nightly batch| I[Airflow DAG\nbatch_scoring]
-        I -->|Evidently| J[Drift Report\nreports/]
-        J -->|drift_share > 0.2| K[Airflow DAG\nretraining]
-    end
-
-    subgraph Retraining
-        K -->|src/training/train.py\nauto_promote=False| D
-        K -->|F1 candidate vs Production| L{Promote or Rollback}
-        L -->|better| D
-        L -->|worse| D
-    end
-```
+> Schémas détaillés : [boucle de réentraînement](docs/architecture/02-boucle-reentrainement.svg) · [CI/CD](docs/architecture/03-cicd.svg) · [versioning & lineage](docs/architecture/04-versioning-lineage.svg) · [business case](docs/architecture/00-business-case.svg)
 
 ---
 
-## Live Demo
+## Sommaire
 
-The Streamlit demo connects to the ChurnGuard API and simulates a SeoLap CRM dashboard with churn scoring.
+1. [Ce que fait le pipeline](#ce-que-fait-le-pipeline)
+2. [Résultats](#résultats)
+3. [Démo en ligne](#démo-en-ligne)
+4. [Quick start](#quick-start)
+5. [Démo du cycle complet (dérive → réentraînement → promotion)](#démo-du-cycle-complet)
+6. [API](#api)
+7. [Versioning & rollback](#versioning--rollback)
+8. [Monitoring & alertes](#monitoring--alertes)
+9. [Orchestration Airflow](#orchestration-airflow)
+10. [CI/CD](#cicd)
+11. [Tests](#tests)
+12. [Structure du repo](#structure-du-repo)
+13. [Documentation](#documentation)
 
-**HuggingFace Space:** https://huggingface.co/spaces/emeliner/churnguard-demo
+---
 
-**Run locally:**
+## Ce que fait le pipeline
 
-```bash
-pip install streamlit pandas requests
-streamlit run demo/app.py
-```
+| Brique | Outil | Ce qui est implémenté |
+|---|---|---|
+| Données | DVC + DagsHub | CSV bruts, features et modèle exporté versionnés ; `dvc.yaml` (`preprocess` → `train`) reproductible |
+| Entraînement | scikit-learn, XGBoost, MLflow | 3 modèles comparés, tuning `RandomizedSearchCV`, seuil calibré sur validation, métriques sur hold-out, figures + importance des features + lineage (git sha, hash DVC) logués |
+| Registry | MLflow Model Registry | `churnguard-model`, une version en `Production`, promotion / rollback en CLI ou par le DAG |
+| Serving | FastAPI, Docker | `/predict`, `/predict/batch` (vectorisé), `/model/info`, `/model/reload` (à chaud), validation stricte des 15 features |
+| Observabilité | Prometheus, PostgreSQL | Latence par requête (log JSON + `/metrics`), prédictions stockées en base |
+| Monitoring | Evidently | Dérive référence vs production (prédictions reçues ou fenêtre labellisée), rapport horodaté, alerte Discord/Slack |
+| Orchestration | Airflow | `batch_scoring` (quotidien) · `auto_retraining` (hebdo) : dérive **ou** nouvelles données → retrain → évaluation hold-out → promotion + reload API + smoke test → rollback si échec |
+| CI/CD | GitHub Actions, GHCR | lint + 35 tests → validation du modèle (F1 ≥ 0,75) → build de 3 images → déploiement (HF Spaces via `deploy-model.yml`, Hetzner prêt) |
 
-> Requires the API to be running on `http://localhost:8001`.
+---
 
-### Screenshots
+## Résultats
 
-| Streamlit Dashboard | MLflow Experiments | Airflow DAGs | API Swagger |
+Le dataset Kaggle fournit un fichier train et un fichier test **qui ne suivent pas la même distribution** (9 features sur 15 en dérive selon Evidently). Plutôt que de les mélanger, le projet en fait le scénario de démo : le fichier test *est* la production qui a dérivé. Détail dans [docs/dataset-report.md](docs/dataset-report.md).
+
+| Modèle XGBoost | Validation (même distribution) | **Hold-out** (distribution de production) |
+|---|---|---|
+| v1 — entraîné sur la référence seule | F1 0,999 | **F1 0,66** · AUC 0,73 (prédit presque tout en churn) |
+| v2 — réentraîné par le DAG (référence 100 k + fenêtre récente, seuil calibré sur la fenêtre) | F1 0,97 | **F1 0,98** · AUC 0,99 |
+
+C'est exactement ce que le pipeline automatise : détecter la dérive, réentraîner sur la fenêtre labellisée, promouvoir uniquement si le hold-out s'améliore. Comparaison des 3 algorithmes, tuning et justification du choix : [docs/model-card.md](docs/model-card.md).
+
+Latence API : `python scripts/bench_latency.py` (objectif p95 < 200 ms sur `/predict` ; le batch score 1 000 comptes en une passe).
+
+---
+
+## Démo en ligne
+
+| Service | HuggingFace Space |
+|---|---|
+| API (Swagger) | https://huggingface.co/spaces/emeliner/churnguard-api |
+| Dashboard Streamlit (CRM SeoLap simulé) | https://huggingface.co/spaces/emeliner/churnguard-demo |
+| MLflow (runs + registry, lecture seule) | https://huggingface.co/spaces/emeliner/churnguard-mlflow |
+| Airflow (DAGs, vitrine — ne pas déclencher) | https://huggingface.co/spaces/emeliner/churnguard-airflow |
+
+Les Spaces MLflow et Airflow sont des vitrines sans exécution (pas de worker, base SQLite). Le cycle complet s'exécute sur la stack Docker locale ci-dessous.
+
+| Streamlit | MLflow | Airflow | Swagger |
 |---|---|---|---|
 | ![Demo](screens/screencapture-emeliner-churnguard-demo-hf-space-2026-05-23-12_58_16.png) | ![MLflow](screens/screencapture-localhost-5000-2026-05-23-09_42_44.png) | ![Airflow](screens/screencapture-localhost-8080-home-2026-05-23-08_30_39.png) | ![Swagger](screens/screencapture-localhost-8001-docs-2026-05-23-08_29_21.png) |
 
 ---
 
-## Stack
+## Quick start
 
-| Component | Tool | Version |
-|---|---|---|
-| Language | Python | 3.11 |
-| ML | Scikit-learn + XGBoost | ≥1.4 / ≥2.0 |
-| API | FastAPI + Uvicorn | ≥0.111 |
-| Model versioning | MLflow | ≥2.13 |
-| Data versioning | DVC | ≥3.50 |
-| Orchestration | Apache Airflow | 2.9.1 |
-| Monitoring | Evidently | ≥0.4 |
-| CI/CD | GitHub Actions | — |
-| Containerisation | Docker Compose | — |
-| Database | PostgreSQL | 15 |
-
----
-
-## Prerequisites
-
-- Docker & Docker Compose
-- Python 3.11 (for local scripts outside Docker)
-- DVC (for pulling data from DagsHub remote)
-- Git
+Prérequis : Docker Desktop, Python 3.11+, Git. DVC est installé avec les dépendances.
 
 ```bash
-pip install dvc
+git clone https://github.com/emelineroblot/jedha-final-projet-dslead.git
+cd jedha-final-projet-dslead
+python -m venv .venv && source .venv/bin/activate   # Windows : .venv\Scripts\activate
+pip install -r requirements-api.txt dvc evidently==0.7.21 pytest ruff
 ```
 
----
-
-## Quick Start
-
-### 1. Clone the repository
+### 1. Récupérer les données (DVC → DagsHub)
 
 ```bash
-git clone https://github.com/emelineroblot/churnguard.git
-cd churnguard
-git checkout develop
-```
-
-### 2. Pull the data
-
-```bash
-# Configure DagsHub credentials (first time only)
 dvc remote modify dagshub --local auth basic
-dvc remote modify dagshub --local user emelineroblot
-dvc remote modify dagshub --local password <your-dagshub-token>
-
-# Pull data and processed features
+dvc remote modify dagshub --local user <user-dagshub>
+dvc remote modify dagshub --local password <token-dagshub>
 dvc pull
 ```
 
-This downloads:
-- `data/customer_churn_dataset-training-master.csv` (22 MB)
-- `data/customer_churn_dataset-testing-master.csv` (3 MB)
-- `data/processed/features_engineered.csv` (35 MB)
-- `data/processed/features_engineered_test.csv` (4 MB)
+Télécharge les CSV bruts (25 MB), les features (`features_engineered.csv`, `features_incoming.csv`, `features_engineered_test.csv`) et `model_artifacts/` (modèle exporté). Sans accès DagsHub : télécharger les 2 CSV sur Kaggle dans `data/` puis `dvc repro preprocess`.
 
-### 3. Train the model (first run)
+### 2. Lancer la stack
 
 ```bash
-# Install dependencies (API only — avoids heavy Airflow install)
-pip install -r requirements-api.txt
-
-# Or full install
-pip install -e ".[dev]"
-
-# Run preprocessing
-python -m src.preprocessing.pipeline
-
-# Train and register the model in MLflow
-python -m src.training.train
+docker compose -f docker/dev/docker-compose.yml up -d --build
 ```
 
-### 4. Start the full stack
-
-```bash
-docker compose -f docker/dev/docker-compose.yml up -d
-```
-
-Wait ~30 seconds for services to initialize, then access:
-
-| Service | URL | Credentials |
+| Service | URL | Identifiants |
 |---|---|---|
-| **ChurnGuard API** | http://localhost:8001 | — |
-| **API Docs (Swagger)** | http://localhost:8001/docs | — |
-| **MLflow UI** | http://localhost:5000 | — |
-| **Airflow UI** | http://localhost:8080 | airflow / airflow |
+| API + Swagger | http://localhost:8001/docs | — |
+| Métriques Prometheus | http://localhost:8001/metrics | — |
+| MLflow | http://localhost:5000 | — |
+| Airflow | http://localhost:8080 | airflow / airflow |
+| PostgreSQL | localhost:5432 | churnguard / churnguard (bases `churnguard`, `mlflow`, `airflow`) |
 
-### 5. Rebuild after source changes
+> Port **8001** pour l'API (8000 est utilisé par SeoLap sur la machine de dev).
+
+### 3. Entraîner et promouvoir un premier modèle
+
+```powershell
+$env:MLFLOW_TRACKING_URI = "http://localhost:5000"     # bash : export MLFLOW_TRACKING_URI=http://localhost:5000
+python -m src.training.train                            # 3 modèles → meilleur promu en Production si F1 ≥ 0.70
+python -m src.training.registry list
+curl -X POST http://localhost:8001/model/reload         # l'API charge la version Production
+```
+
+Le premier entraînement (référence seule) donne F1 ≈ 0,66 sur le hold-out : **sous le seuil de promotion**, il est enregistré sans être promu. Pour simuler l'état « modèle en prod qui a dérivé » : `python -m src.training.registry promote --run-id <run_id>`.
+
+Tuning optionnel (écrit `src/training/best_params.json`, repris par `train.py`) :
 
 ```bash
-# Rebuild API image only
-docker compose -f docker/dev/docker-compose.yml up -d --build api
-
-# Full reset (deletes all volumes)
-docker compose -f docker/dev/docker-compose.yml down -v
+python -m src.training.tuner --sample 100000 --n-iter 20 --cv 3
 ```
 
 ---
 
-## API Reference
-
-Base URL: `http://localhost:8001`
-
-### `GET /health`
-
-Health check.
+## Démo du cycle complet
 
 ```bash
-curl http://localhost:8001/health
-```
+# 1. (optionnel) amplifier la dérive naturelle — sinon features_incoming.csv suffit
+python -m src.retraining.scripts.simulate_drift --noise 0.3
 
-```json
-{"status": "ok", "model_loaded": true}
-```
+# 2. Contrôle de dérive : rapport Evidently + verdict (reports/drift_report.html)
+python -m src.monitoring.alert
+#   → {"drifted": true, "reason": "60% des features en dérive (seuil 20%)", ...}
 
----
+# 3. Déclencher le DAG de réentraînement (ou bouton ▶ dans l'UI Airflow)
+docker compose -f docker/dev/docker-compose.yml exec airflow-scheduler airflow dags trigger auto_retraining
 
-### `POST /predict`
-
-Predict churn risk for a single account.
-
-**Request body:**
-
-```json
-{
-  "account_id": "ACC-001",
-  "features": {
-    "Age": 35,
-    "Gender": 1,
-    "Tenure": 24,
-    "Usage Frequency": 15,
-    "Support Calls": 3,
-    "Payment Delay": 10,
-    "Contract Length": 1,
-    "Total Spend": 800.0,
-    "Last Interaction": 7,
-    "Subscription Type_Basic": 0,
-    "Subscription Type_Standard": 1,
-    "Subscription Type_Premium": 0,
-    "support_intensity": 0.12,
-    "spend_per_month": 32.0,
-    "payment_risk_score": 30.0
-  }
-}
-```
-
-**Feature reference:**
-
-| Feature | Type | Description |
-|---|---|---|
-| `Age` | int | Customer age |
-| `Gender` | int | 1 = male, 0 = female |
-| `Tenure` | int | Months as customer |
-| `Usage Frequency` | int | Number of sessions per month |
-| `Support Calls` | int | Number of support calls in the period |
-| `Payment Delay` | int | Days of payment delay |
-| `Contract Length` | int | 0 = Monthly, 1 = Quarterly, 2 = Annual |
-| `Total Spend` | float | Total amount spent |
-| `Last Interaction` | int | Days since last interaction |
-| `Subscription Type_Basic` | int | 1 if Basic plan, else 0 |
-| `Subscription Type_Standard` | int | 1 if Standard plan, else 0 |
-| `Subscription Type_Premium` | int | 1 if Premium plan, else 0 |
-| `support_intensity` | float | Support Calls / (Tenure + 1) |
-| `spend_per_month` | float | Total Spend / (Tenure + 1) |
-| `payment_risk_score` | float | Payment Delay × Support Calls |
-
-**Response:**
-
-```json
-{
-  "account_id": "ACC-001",
-  "churn_score": 0.1823,
-  "churn_risk": "low"
-}
-```
-
-`churn_risk` thresholds: `low` < 0.4 ≤ `medium` < 0.7 ≤ `high`
-
-```bash
-curl -X POST http://localhost:8001/predict \
-  -H "Content-Type: application/json" \
-  -d '{
-    "account_id": "ACC-001",
-    "features": {
-      "Age": 35, "Gender": 1, "Tenure": 24,
-      "Usage Frequency": 15, "Support Calls": 3,
-      "Payment Delay": 10, "Contract Length": 1,
-      "Total Spend": 800.0, "Last Interaction": 7,
-      "Subscription Type_Basic": 0,
-      "Subscription Type_Standard": 1,
-      "Subscription Type_Premium": 0,
-      "support_intensity": 0.12,
-      "spend_per_month": 32.0,
-      "payment_risk_score": 30.0
-    }
-  }'
-```
-
----
-
-### `POST /predict/batch`
-
-Score multiple accounts in a single call.
-
-```json
-{
-  "accounts": [
-    {"account_id": "ACC-001", "features": { ... }},
-    {"account_id": "ACC-002", "features": { ... }}
-  ]
-}
-```
-
-**Response:**
-
-```json
-{
-  "results": [
-    {"account_id": "ACC-001", "churn_score": 0.1823, "churn_risk": "low"},
-    {"account_id": "ACC-002", "churn_score": 0.8910, "churn_risk": "high"}
-  ]
-}
-```
-
----
-
-### `GET /model/info`
-
-Returns metadata about the model currently in Production.
-
-```bash
+# 4. Suivre : Airflow → auto_retraining (check_drift → retrain_model → evaluate_model → decide → promote_model)
+#            MLflow  → nouvelle version en Production, l'ancienne archivée
+#            API     → GET /model/info : version + decision_threshold mis à jour (reload automatique)
 curl http://localhost:8001/model/info
 ```
 
-```json
-{
-  "model_name": "churnguard-model",
-  "version": "3",
-  "stage": "Production",
-  "metrics": {
-    "f1_score": 0.999,
-    "auc_roc": 1.0,
-    "precision": 0.999,
-    "recall": 0.999
-  },
-  "trained_at": "2025-05-18T14:32:00+00:00",
-  "feature_count": 15
-}
-```
-
----
-
-## Model Versioning & Rollback
-
-All experiments are tracked in MLflow at http://localhost:5000.
-
-The active model is registered as **`churnguard-model`** in the **`Production`** stage.
-
-### Rollback to a previous version
+Rollback manuel en moins d'une minute :
 
 ```bash
-# List available versions
-python -m src.training.registry
-
-# Rollback to version N
-python -m src.training.registry rollback --version N
+python -m src.training.registry rollback --version 1
+curl -X POST http://localhost:8001/model/reload
 ```
 
-This transitions version N back to `Production` in under 5 minutes, and the API picks up the new model at next startup.
+Alertes : définir `ALERT_WEBHOOK_URL` (webhook Discord ou Slack) dans `docker/dev/.env` — dérive détectée, réentraînement déclenché, promotion, rollback et échecs de DAG sont notifiés.
 
 ---
 
-## Monitoring & Drift Detection
+## API
 
-Evidently generates drift reports comparing the training distribution to current inference data.
+Documentation complète : [docs/api.md](docs/api.md) · Swagger : http://localhost:8001/docs
 
 ```bash
-# Check for drift (returns True if drift detected)
-python -c "from src.monitoring.alert import check_drift; print(check_drift())"
-
-# Simulate artificial drift to trigger the pipeline (demo)
-python src/retraining/scripts/simulate_drift.py --noise 0.3
+curl -X POST http://localhost:8001/predict -H "Content-Type: application/json" -d '{
+  "account_id": "ACC-001",
+  "features": {"Age": 35, "Gender": 1, "Tenure": 24, "Usage Frequency": 15, "Support Calls": 3,
+               "Payment Delay": 10, "Contract Length": 1, "Total Spend": 800.0, "Last Interaction": 7,
+               "support_intensity": 0.12, "spend_per_month": 32.0, "payment_risk_score": 30.0,
+               "Subscription Type_Basic": 0, "Subscription Type_Premium": 0, "Subscription Type_Standard": 1}
+}'
+# {"account_id":"ACC-001","churn_score":0.1823,"churn_risk":"low","churn_predicted":false,"model_version":"2"}
 ```
 
-Reports are saved to `reports/` as JSON and HTML.
-
-**Alert thresholds:**
-- `drift_share > 0.2` — more than 20% of features have drifted
-- F1 drop `> 0.05` — model performance degradation
-
----
-
-## Automated Retraining (Airflow)
-
-Two DAGs are available in the Airflow UI at http://localhost:8080:
-
-| DAG | Schedule | Description |
-|---|---|---|
-| `batch_scoring_dag` | Daily at 02:00 | Scores all active accounts, simulates Mautic push |
-| `retraining_dag` | Monday at 03:00 | Checks drift → retrains → promotes or rolls back |
-
-### Manually trigger retraining
-
-```bash
-# Via Airflow CLI (inside the scheduler container)
-docker exec -it churnguard-dev-airflow-scheduler-1 \
-  airflow dags trigger retraining_dag
-
-# Or trigger from the Airflow UI → DAGs → retraining_dag → Trigger DAG ▶
-```
-
-The retraining DAG:
-1. Runs `check_drift()` — branches to `retrain` or `skip`
-2. Retrains with `auto_promote=False` — registers candidate in MLflow
-3. Compares candidate F1 vs current Production F1 (via XCom)
-4. Promotes candidate if better, otherwise rolls back
-
----
-
-## Running Tests
-
-```bash
-# API tests (mock-based, no MLflow required)
-.venv313/Scripts/python.exe -m pytest tests/test_api.py -v
-
-# Linting
-.venv313/Scripts/python.exe -m ruff check src/
-```
-
-> `tests/test_preprocessing.py` is excluded from CI — it targets the legacy rivalytics schema and is pending rewrite for the muhammadshahidazeem dataset.
-
----
-
-## CI/CD Pipeline
-
-GitHub Actions workflow: `.github/workflows/ci.yml`
-
-| Job | Trigger | Steps |
-|---|---|---|
-| `test` | Push to `develop`/`main`, PR to `main` | ruff lint + pytest |
-| `build` | Same | Docker build + push to GHCR |
-| `deploy` | Disabled (`if: false`) | To activate for Hetzner deploy |
-
-Docker image: `ghcr.io/emelineroblot/churnguard-api:<branch>-<sha>`
-
----
-
-## Project Structure
-
-```
-final-project-dslead/
-├── data/
-│   ├── customer_churn_dataset-training-master.csv   # Raw train (DVC)
-│   ├── customer_churn_dataset-testing-master.csv    # Raw test (DVC)
-│   └── processed/
-│       ├── features_engineered.csv                  # Train features (DVC)
-│       └── features_engineered_test.csv             # Test features (DVC)
-├── notebooks/
-│   └── 01_eda.ipynb                                 # EDA & exploration
-├── src/
-│   ├── preprocessing/       # loader → cleaner → features → pipeline
-│   ├── training/            # train.py + registry.py
-│   ├── api/                 # FastAPI app + Pydantic schemas
-│   ├── monitoring/          # drift_report.py + alert.py
-│   └── retraining/
-│       ├── dags/            # batch_scoring_dag.py + retraining_dag.py
-│       └── scripts/         # simulate_drift.py
-├── tests/
-│   └── test_api.py
-├── docker/
-│   ├── dev/docker-compose.yml
-│   └── prod/docker-compose.yml
-├── demo/
-│   ├── app.py               # Streamlit dashboard
-│   ├── api.py               # API client helpers
-│   ├── data.py              # Sample data & feature constants
-│   └── requirements.txt
-├── screens/                 # Stack screenshots (MLflow, Airflow, API, demo)
-├── .github/workflows/ci.yml
-├── Dockerfile
-├── Dockerfile.mlflow
-├── Dockerfile.hf            # HuggingFace Space deployment
-├── requirements-api.txt
-└── pyproject.toml
-```
-
----
-
-## Dataset
-
-**Source:** [muhammadshahidazeem/customer-churn-dataset](https://www.kaggle.com/datasets/muhammadshahidazeem/customer-churn-dataset) (Kaggle)
-
-| Split | Rows | Churn rate |
-|---|---|---|
-| Train | 440,832 | 56.7% |
-| Test | 64,374 | 47.4% |
-
-**Model performance (XGBoost, v3):**
-
-| Metric | Score |
+| Endpoint | Rôle |
 |---|---|
-| F1-score | 0.999 |
-| AUC-ROC | 1.000 |
-| Precision | 0.999 |
-| Recall | 0.999 |
+| `GET /health` | Liveness + version du modèle |
+| `POST /predict` | Score d'un compte (`churn_score`, bande `churn_risk`, `churn_predicted` au seuil du modèle) |
+| `POST /predict/batch` | Jusqu'à 5 000 comptes, une seule passe `predict_proba` |
+| `GET /model/info` | Version, métriques hold-out, seuil de décision, features attendues |
+| `POST /model/reload` | Recharge la version `Production` sans redémarrage |
+| `GET /metrics` | Prometheus : latence par endpoint, volume par niveau de risque, version servie |
 
-Top features by importance: Total Spend (21%) → Support Calls (18%) → Contract Length (12%) → payment_risk_score (11%) → Payment Delay (10%).
-
-> High scores are expected on this synthetic dataset — feature distributions were generated to correlate directly with the target. The pipeline architecture is designed to retrain on real SeoLap data as it becomes available.
+Feature manquante, inconnue ou hors bornes → `422` détaillé (schéma Pydantic typé). Modèle absent → `503`.
 
 ---
 
-## License
+## Versioning & rollback
+
+- **Données** : DVC, remote DagsHub (`https://dagshub.com/emelineroblot/churnguard.dvc`). `dvc.yaml` décrit `preprocess` → `train` ; `dvc repro` ne rejoue que ce qui a changé.
+- **Modèles** : MLflow Registry `churnguard-model`. Chaque run logue hyperparamètres, métriques (validation + hold-out), seuil, signature, matrice de confusion, ROC, importance des features, et les tags `git_sha`, `data_dvc_md5`, `extra_data`, `threshold_calibrated_on`.
+- **Artefact standalone** : `python -m src.training.export_model` → `model_artifacts/` (tracké DVC), utilisé par la CI et le Space HF sans serveur MLflow.
+
+```bash
+python -m src.training.registry list                    # versions, stage, F1, date
+python -m src.training.registry promote --run-id <id>   # enregistre + Production (archive l'ancienne)
+python -m src.training.registry rollback --version N    # remet N en Production
+```
+
+Le rollback est aussi **automatique** dans le DAG : après promotion, l'API est rechargée et testée ; si le smoke test échoue, la version précédente revient en Production et une alerte critique est envoyée.
+
+---
+
+## Monitoring & alertes
+
+`src/monitoring/alert.py` génère **à chaque appel** un rapport Evidently (JSON + HTML, copie horodatée dans `reports/history/`) en comparant la référence (échantillon du train) aux données courantes, choisies dans l'ordre :
+
+1. chemin explicite (`--current`),
+2. **prédictions réellement reçues par l'API** (table `predictions`, 7 derniers jours, si ≥ 100 lignes),
+3. `features_drifted.csv` (dérive amplifiée pour la démo),
+4. `features_incoming.csv` (nouvelles données labellisées).
+
+Seuils : `share_of_drifted_columns > 0.2` ou chute de F1 `> 0.05` (quand labels et scores sont disponibles). Alerte via webhook (`ALERT_WEBHOOK_URL`) + log.
+
+Latence : header `X-Process-Time-Ms`, log JSON par requête, histogramme Prometheus `churnguard_prediction_latency_ms`.
+
+---
+
+## Orchestration Airflow
+
+| DAG | Schedule | Étapes |
+|---|---|---|
+| `batch_scoring` | `0 2 * * *` | charge les comptes actifs → `/predict/batch` par lots de 500 → segments CRM (Mautic simulé) → résumé notifié |
+| `auto_retraining` | `0 3 * * 1` | `check_drift` (Evidently **ou** ≥ 5 000 nouvelles lignes) → `retrain_model` (référence 100 k + fenêtre récente, `auto_promote=False`) → `evaluate_model` (F1 hold-out, chaque modèle à son seuil) → `decide` → `promote_model` (+ `/model/reload` + smoke test + rollback) ou `keep_current` |
+
+Les tâches n'échangent que des scalaires par XCom ; les données passent par les volumes montés (`CHURNGUARD_ROOT=/opt/airflow`). L'image `Dockerfile.airflow` embarque MLflow, XGBoost, scikit-learn et Evidently.
+
+Variables : `MLFLOW_TRACKING_URI`, `CHURNGUARD_API_URL`, `DATABASE_URL`, `ALERT_WEBHOOK_URL`, `RETRAIN_REFERENCE_ROWS` (100 000), `NEW_DATA_MIN_ROWS` (5 000), `BATCH_SAMPLE_SIZE` (500 en démo, 0 = tous).
+
+---
+
+## CI/CD
+
+`.github/workflows/ci.yml` (push / PR sur `main`) :
+
+| Job | Contenu | Bloque si |
+|---|---|---|
+| `test` | `ruff check src/ tests/` + `pytest tests/` (API, preprocessing, monitoring, training) | lint ou test rouge |
+| `validate-model` | `dvc pull model_artifacts` puis F1 ≥ 0,75 sur `tests/fixtures/sample_test.csv` (500 lignes hold-out) | F1 insuffisant — ignoré avec warning si les secrets DagsHub sont absents |
+| `build` | 3 images (`churnguard-api`, `churnguard-mlflow`, `churnguard-airflow`) → GHCR, tags `main` + `main-<sha>` | — |
+| `deploy` | `docker compose pull && up -d` sur Hetzner via SSH | désactivé (`if: false`) — démo déployée sur HF Spaces |
+
+`.github/workflows/deploy-model.yml` (manuel ou tag `model-v*`) : pull du modèle (DVC) → validation → bundle → push sur le Space HF `churnguard-api`. Ce workflow déploie une **mise à jour du modèle** indépendamment du code.
+
+Secrets GitHub : `DAGSHUB_USER`, `DAGSHUB_TOKEN`, `HF_TOKEN` (+ `HETZNER_HOST`, `HETZNER_SSH_KEY` pour activer `deploy`).
+
+---
+
+## Tests
+
+```bash
+pytest tests/ -v          # 35 tests (+ tests DAG exécutés dans le conteneur Airflow : pytest tests/test_dags.py)
+ruff check src/ tests/
+```
+
+| Fichier | Couverture |
+|---|---|
+| `test_api.py` | endpoints, validation 422 (feature manquante / inconnue / hors bornes), batch vectorisé, reload, 503 sans modèle, `/metrics` |
+| `test_preprocessing.py` | nettoyage, encodages, features dérivées, ordre des colonnes, modalité absente |
+| `test_monitoring.py` | parsing Evidently (dont le piège `drift_share` = seuil, pas valeur observée), seuils, alertes webhook, store no-op |
+| `test_training.py` | seuil optimal, métriques, concaténation fenêtre récente, lineage DVC, importance des features |
+| `test_dags.py` | import des DAGs, tâches et dépendances (nécessite Airflow, POSIX) |
+
+---
+
+## Structure du repo
+
+```
+├── src/
+│   ├── paths.py                 # chemins (CHURNGUARD_ROOT) partagés local / conteneurs
+│   ├── preprocessing/           # loader → cleaner → features (FEATURE_COLUMNS) → pipeline (split incoming / hold-out)
+│   ├── training/                # train.py · tuner.py · evaluate.py · registry.py (CLI) · validate.py · export_model.py
+│   ├── api/                     # main.py (FastAPI, /metrics, reload) · schemas.py (Features typées)
+│   ├── monitoring/              # drift_report.py · alert.py · notify.py (webhook) · store.py (PostgreSQL)
+│   └── retraining/
+│       ├── dags/                # batch_scoring_dag.py · retraining_dag.py
+│       └── scripts/             # simulate_drift.py
+├── tests/                       # + fixtures/sample_test.csv (500 lignes hold-out)
+├── scripts/bench_latency.py
+├── docker/dev/ · docker/prod/   # compose séparés (+ .env.example prod)
+├── Dockerfile · Dockerfile.mlflow · Dockerfile.airflow · Dockerfile.hf
+├── .github/workflows/           # ci.yml · deploy-model.yml
+├── dvc.yaml · dvc.lock · model_artifacts.dvc · data/*.dvc
+├── docs/                        # architecture/ · api.md · dataset-report.md · model-card.md
+├── notebooks/                   # 02_eda_new_dataset.ipynb (EDA dataset actif) · 01_eda.ipynb (rivalytics, archivé)
+├── demo/                        # dashboard Streamlit (Space churnguard-demo)
+└── screens/                     # captures de la stack
+```
+
+---
+
+## Documentation
+
+- [docs/dataset-report.md](docs/dataset-report.md) — dataset, EDA, preprocessing justifié, dérive train/test
+- [docs/model-card.md](docs/model-card.md) — choix de l'algorithme, tuning, métriques, limites
+- [docs/api.md](docs/api.md) — guide d'intégration de l'API
+- [docs/architecture/](docs/architecture/) — schémas (SVG)
+- `notebooks/02_eda_new_dataset.ipynb` — EDA exécutée
+
+## Périmètre exclu
+
+Kubernetes, intégration SeoLap en production, appel Mautic réel (simulé), authentification API, interface front-end (hors démo Streamlit).
+
+## Licence
 
 MIT

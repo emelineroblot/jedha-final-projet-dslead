@@ -1,9 +1,12 @@
 FROM python:3.11-slim
 
+# libgomp1 : runtime OpenMP requis par XGBoost
+RUN apt-get update && apt-get install -y --no-install-recommends libgomp1 && rm -rf /var/lib/apt/lists/*
+
 WORKDIR /app
 
 COPY requirements-api.txt .
-RUN pip install --no-cache-dir -r requirements-api.txt joblib
+RUN pip install --no-cache-dir -r requirements-api.txt
 
 COPY src/ ./src/
 COPY model_artifacts/ ./model_artifacts/

@@ -1,0 +1,31 @@
+schema: '2.0'
+stages:
+  preprocess:
+    cmd: python -m src.preprocessing.pipeline
+    deps:
+    - path: data/customer_churn_dataset-testing-master.csv
+      hash: md5
+      md5: 55289b95d9b4310f554778c725097c5b
+      size: 3282220
+    - path: data/customer_churn_dataset-training-master.csv
+      hash: md5
+      md5: a8d02f389b1e2a894b1decc4dfb658be
+      size: 23448754
+    - path: src/preprocessing
+      hash: md5
+      md5: 2d87ab1930c6a53d0101465a3657825d.dir
+      size: 4337
+      nfiles: 5
+    outs:
+    - path: data/processed/features_engineered.csv
+      hash: md5
+      md5: 049e4cb1a152c00e34e14a3ab3dd7954
+      size: 36440402
+    - path: data/processed/features_engineered_test.csv
+      hash: md5
+      md5: 6a20e5035cdbeeaef98e3177b440ed90
+      size: 2158029
+    - path: data/processed/features_incoming.csv
+      hash: md5
+      md5: 0b37240bb5393e2bb4080af63753c7e2
+      size: 2156073

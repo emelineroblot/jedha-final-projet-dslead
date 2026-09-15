@@ -1,13 +1,11 @@
-from pathlib import Path
-
 import pandas as pd
 
-DATA_DIR = Path(__file__).parents[2] / "data"
+from src.paths import RAW_TEST_PATH, RAW_TRAIN_PATH
 
 
 def load_train() -> pd.DataFrame:
-    return pd.read_csv(DATA_DIR / "customer_churn_dataset-training-master.csv")
+    return pd.read_csv(RAW_TRAIN_PATH)
 
 
 def load_test() -> pd.DataFrame:
-    return pd.read_csv(DATA_DIR / "customer_churn_dataset-testing-master.csv")
+    return pd.read_csv(RAW_TEST_PATH)

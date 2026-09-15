@@ -1,0 +1,25 @@
+# Pipeline DVC reproductible : `dvc repro` rejoue preprocessing → entraînement
+# uniquement si les dépendances (données brutes, code) ont changé. Les sorties du
+# preprocessing sont versionnées par ce fichier (dvc.lock) et poussées sur DagsHub.
+stages:
+  preprocess:
+    cmd: python -m src.preprocessing.pipeline
+    deps:
+      - data/customer_churn_dataset-training-master.csv
+      - data/customer_churn_dataset-testing-master.csv
+      - src/preprocessing
+    outs:
+      - data/processed/features_engineered.csv
+      - data/processed/features_incoming.csv
+      - data/processed/features_engineered_test.csv
+
+  # L'entraînement logue ses artefacts dans MLflow (pas de sortie fichier DVC).
+  train:
+    cmd: python -m src.training.train --no-promote
+    deps:
+      - data/processed/features_engineered.csv
+      - data/processed/features_engineered_test.csv
+      - data/processed/features_incoming.csv
+      - src/training/train.py
+      - src/training/evaluate.py
+      - src/preprocessing/features.py

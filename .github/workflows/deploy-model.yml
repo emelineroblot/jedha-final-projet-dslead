@@ -1,0 +1,62 @@
+name: Deploy model to HuggingFace Space
+
+# Déploiement déclenché par une mise à jour du modèle (et non du code) :
+#   - manuellement (workflow_dispatch) après une promotion dans MLflow + `dvc push` de model_artifacts/
+#   - automatiquement sur un tag `model-v*` (ex. `git tag model-v5 && git push --tags`)
+# Le Space Docker reconstruit l'image et sert la nouvelle version via MODEL_PATH.
+# Secrets requis : HF_TOKEN (write), DAGSHUB_USER, DAGSHUB_TOKEN. Variable : HF_SPACE (ex. emeliner/churnguard-api).
+
+on:
+  workflow_dispatch:
+  push:
+    tags: ["model-v*"]
+
+jobs:
+  validate-and-deploy:
+    runs-on: ubuntu-latest
+    env:
+      HF_TOKEN: ${{ secrets.HF_TOKEN }}
+      HF_SPACE: ${{ vars.HF_SPACE || 'emeliner/churnguard-api' }}
+      DAGSHUB_USER: ${{ secrets.DAGSHUB_USER }}
+      DAGSHUB_TOKEN: ${{ secrets.DAGSHUB_TOKEN }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+      - name: Install dependencies
+        run: pip install -r requirements-api.txt dvc==3.67.1 huggingface_hub
+
+      - name: Pull model artefact (DVC)
+        run: |
+          dvc remote modify dagshub --local auth basic
+          dvc remote modify dagshub --local user "$DAGSHUB_USER"
+          dvc remote modify dagshub --local password "$DAGSHUB_TOKEN"
+          dvc pull model_artifacts.dvc
+
+      - name: Validate model before deploy
+        run: python -m src.training.validate --model model_artifacts/model.joblib --data tests/fixtures/sample_test.csv --min-f1 0.75
+
+      - name: Assemble Space bundle
+        run: |
+          mkdir -p bundle
+          cp -r src model_artifacts requirements-api.txt pyproject.toml bundle/
+          cp Dockerfile.hf bundle/Dockerfile
+          cp SPACES_README.md bundle/README.md
+          find bundle -name "__pycache__" -type d -exec rm -rf {} +
+
+      - name: Push to HuggingFace Space
+        run: |
+          python - <<'EOF'
+          import os
+          from huggingface_hub import HfApi
+          api = HfApi(token=os.environ["HF_TOKEN"])
+          api.upload_folder(
+              folder_path="bundle",
+              repo_id=os.environ["HF_SPACE"],
+              repo_type="space",
+              commit_message=f"deploy: model from {os.environ.get('GITHUB_REF_NAME', 'manual')} ({os.environ.get('GITHUB_SHA', '')[:7]})",
+          )
+          print("Space mis à jour :", os.environ["HF_SPACE"])
+          EOF

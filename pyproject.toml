@@ -4,28 +4,45 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "churnguard"
-version = "0.1.0"
+version = "1.1.0"
 description = "Pipeline MLOps de prédiction de churn SeoLap — Jedha Data Science Lead"
 requires-python = ">=3.11"
+# Cœur = ce que l'API embarque (voir requirements-api.txt pour les versions pinnées de l'image Docker)
 dependencies = [
     "pandas>=2.2",
+    "numpy>=2.0",
     "scikit-learn>=1.4",
     "xgboost>=2.0",
-    "mlflow>=2.13",
+    "mlflow>=3.0,<4",
+    "joblib>=1.4",
     "fastapi>=0.111",
     "uvicorn[standard]>=0.29",
     "pydantic>=2.7",
-    "evidently>=0.4",
-    "apache-airflow>=2.9",
-    "dvc>=3.50",
     "httpx>=0.27",
+    "requests>=2.31",
+    "sqlalchemy>=2.0",
+    "psycopg2-binary>=2.9",
+    "prometheus-client>=0.20",
+    "prometheus-fastapi-instrumentator>=7.0",
 ]
 
 [project.optional-dependencies]
+# Monitoring + tuning + versioning données (poste de dev)
+ml = [
+    "evidently>=0.7,<0.8",
+    "dvc>=3.50",
+    "matplotlib>=3.8",
+    "scipy>=1.12",
+]
+# Airflow est lourd (pitfall P15) : à installer uniquement pour exécuter les DAGs hors Docker
+airflow = ["apache-airflow>=2.9"]
 dev = [
     "pytest>=8.0",
     "pytest-asyncio>=0.23",
     "ruff>=0.4",
+    "nbconvert>=7.0",
+    "ipykernel>=6.0",
+    "seaborn>=0.13",
 ]
 
 [tool.setuptools.packages.find]
@@ -33,9 +50,10 @@ where = ["."]
 include = ["src*"]
 
 [tool.ruff]
-line-length = 100
+line-length = 120
 target-version = "py311"
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
 testpaths = ["tests"]
+filterwarnings = ["ignore::DeprecationWarning", "ignore::FutureWarning"]

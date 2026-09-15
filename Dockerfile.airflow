@@ -1,0 +1,17 @@
+# Image Airflow capable d'exécuter les tâches ChurnGuard (entraînement, Evidently, MLflow).
+# Python 3.11 obligatoire : mlflow 3.x / xgboost 3.x / numpy 2.x ne supportent plus 3.8 (tag par défaut).
+FROM apache/airflow:2.9.1-python3.11
+
+USER root
+RUN apt-get update && apt-get install -y --no-install-recommends git libgomp1 \
+    && rm -rf /var/lib/apt/lists/*
+USER airflow
+
+COPY requirements-airflow.txt /tmp/requirements-airflow.txt
+RUN pip install --no-cache-dir -r /tmp/requirements-airflow.txt
+
+# src/, data/ et reports/ sont montés dans /opt/airflow (docker-compose) ;
+# CHURNGUARD_ROOT permet à src/paths.py de les retrouver.
+ENV PYTHONPATH=/opt/airflow \
+    CHURNGUARD_ROOT=/opt/airflow \
+    AIRFLOW__CORE__LOAD_EXAMPLES=False

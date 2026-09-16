@@ -17,6 +17,8 @@ REST API for customer churn prediction — Jedha Data Science Lead final project
 - `POST /predict` — single account churn score
 - `POST /predict/batch` — batch scoring
 - `GET /model/info` — active model metadata
+- `POST /model/reload` — reload the Production model
+- `GET /metrics` — Prometheus metrics
 - `GET /docs` — Swagger UI
 
-See the [GitHub repo](https://github.com/emelineroblot/churnguard) for full documentation.
+See the [GitHub repo](https://github.com/emelineroblot/jedha-final-projet-dslead) for full documentation.

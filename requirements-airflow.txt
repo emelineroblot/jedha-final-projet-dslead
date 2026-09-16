@@ -1,0 +1,9 @@
+# Dépendances ajoutées à l'image Airflow (Dockerfile.airflow) pour exécuter les tâches des DAGs :
+# entraînement (train.py), évaluation, contrôle de dérive (Evidently), appels API et MLflow.
+# pandas/numpy ne sont pas pinnés : pip les résout dans les contraintes d'Airflow 2.9.1.
+mlflow==3.12.0
+xgboost==3.2.0
+scikit-learn==1.8.0
+evidently==0.7.21
+joblib==1.5.3
+requests>=2.31

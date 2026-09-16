@@ -45,23 +45,57 @@ final-project-dslead/
 | 7 | Pipeline CI/CD GitHub Actions | S2–S3 | ✓ |
 | 8 | Orchestration Airflow | S3 | ✓ |
 | 9 | Monitoring Evidently | S3–S4 | ✓ |
-| 10 | Documentation & diagramme | S4 | ⏳ |
-| 11 | Présentation jury | S5 | ⏳ |
+| 10 | Documentation & diagramme | S4 | ✓ |
+| 11 | Présentation jury | S5 | ⏳ (semaine du 21/09/2026) |
 
 **Workflow git** : `main` + `feature/*` uniquement (branche `develop` supprimée le 2026-09-15 — phases 0–10 mergées dans `main`). Une feature = une branche `feature/nom-court`, mergée dans `main` une fois validée.
+
+## Phase 10 — Audit & durcissement (2026-09-15) ✓
+
+Audit complet vs énoncé Jedha dans `docs/audit.md` (non versionné). Corrections livrées sur `feature/audit-fixes`.
+
+**Découvertes majeures (à connaître pour la soutenance)** :
+- **Le fichier test Kaggle ne suit pas la distribution du train** : le modèle "F1 0.999" (validation sur split du train) fait **F1 0.66 / AUC 0.73** sur le fichier test (prédit presque tout en churn). Décision : le test = production qui a dérivé → scindé en `features_incoming.csv` (nouvelles données labellisées, 32k) et `features_engineered_test.csv` (hold-out, 32k). Evidently détecte 9/15 features en dérive **naturellement** (simulate_drift devient optionnel).
+- **Bug Evidently (P23)** : `drift_share` dans `DatasetDriftMetric` = le SEUIL paramétré (0.5), pas la part observée → l'ancien `check_drift` détectait toujours une dérive. Utiliser `share_of_drifted_columns`.
+- **Bug rapport figé (P24)** : `check_drift` ne régénérait le rapport que s'il était absent → verdict figé. Désormais toujours régénéré (+ copie horodatée `reports/history/`).
+- **Réentraînement sur les mêmes données (P25)** : `train()` relisait toujours le même CSV → candidat = prod, jamais promu. Désormais `train(extra_data_path=…, reference_rows=100k)` : validation/seuil calibrés sur la fenêtre récente. Résultat hold-out : **0.657 → 0.978** (XGBoost), RF 0.973, LogReg 0.753.
+- **DAGs non exécutables dans Docker (P26)** : image Airflow stock sans deps ML ni `src/`. → `Dockerfile.airflow` (`apache/airflow:2.9.1-python3.11` + `requirements-airflow.txt`), mounts `src/ data/ reports/ mlruns/`, `CHURNGUARD_ROOT=/opt/airflow`, `MLFLOW_TRACKING_URI` + `CHURNGUARD_API_URL` dans l'env Airflow. **Stack Docker validée en live le 2026-09-16** (Avast en pause) : DAGs importés sans erreur, `check_drift` dans le conteneur = 60 % de features en dérive, DAG `auto_retraining` vert de bout en bout (candidat F1 0.9777 vs prod 0.6566 → v5 promue → `/model/reload` → smoke test OK → alerte), rollback v5→v1→v5 en 6 s, `batch_scoring` OK (500 comptes, 399 à risque élevé), 503 prédictions en base et **contrôle de dérive alimenté par la table `predictions`**, latence p95 59 ms / 1 000 comptes en 110 ms.
+
+**Nouveautés** : `src/paths.py` (chemins via `CHURNGUARD_ROOT`) · `FEATURE_COLUMNS` canonique (`features.py`, ordre = modèle) · API : `Features` Pydantic typée (422), batch vectorisé, `POST /model/reload`, `/metrics` Prometheus, latence loguée, stockage des prédictions (`store.py`, `DATABASE_URL`) · `notify.py` (webhook `ALERT_WEBHOOK_URL`) · `registry.py` CLI (`list/promote/rollback`) · `tuner.py` (RandomizedSearchCV → `best_params.json`) · `validate.py` (gate CI F1 ≥ 0.75) · `evaluate.py` (métriques + figures + importance) · lineage MLflow (`git_sha`, `data_dvc_md5` via dvc.lock) · `dvc.yaml` (preprocess → train) · `model_artifacts.dvc` · DAG retraining : trigger dérive OU ≥ 5000 nouvelles lignes, rollback réel + smoke test + reload API · CI : triggers `main`, `validate-model`, build 3 images, `deploy-model.yml` (HF Space) · docs : `docs/architecture/*.svg` (5 schémas), `api.md`, `dataset-report.md`, `model-card.md` · 36 tests.
+
+**Pitfalls** :
+- **P27** : `validate.py` doit utiliser le `decision_threshold` du modèle (0.89 après retrain), pas 0.5 — sinon F1 0.72 au lieu de 0.97 sur la fixture.
+- **P28** : `apache/airflow:2.9.1` (tag par défaut) est en Python 3.8 → mlflow 3 / xgboost 3 / numpy 2 non installables. Utiliser `2.9.1-python3.11`.
+- **P29** : Python 3.13 local vs 3.11 Docker — `numpy>=2.4` exige ≥ 3.11, OK. `test_dags.py` skippé sur Windows (Airflow 3 importe `fcntl`).
+- **P30** : le hook rtk casse les heredocs bash contenant du code Python multi-blocs → utiliser l'outil Write / un script Python pour les patchs.
+- **P31** : `docs/` versionné sauf `docs/soutenance*` et `docs/audit.md` (gitignore). `.env.example` autorisé malgré `.env.*`.
+- **P33 (machine Emeline)** : **Avast intercepte le TLS** → `pip` dans les conteneurs échoue (`CERTIFICATE_VERIFY_FAILED` sur pypi.org). Les Dockerfiles acceptent `--build-arg PIP_TRUSTED_HOST="pypi.org files.pythonhosted.org"` (vide par défaut = CI normale). En local : `docker compose -f docker/dev/docker-compose.yml -f docker/dev/docker-compose.override.yml build` (override gitignoré, modèle dans `.override.yml.example`). Compose ne charge PAS l'override automatiquement quand `-f` est utilisé.
+- **P35** : `mlflow-skinny 3.12.0` exige `starlette<1` → `fastapi==0.116.1` + `prometheus-fastapi-instrumentator==7.1.0` (pas 0.136 / 8.1). Le venv local était incohérent (`pip check`) mais fonctionnait par chance ; l'image Docker, elle, refusait de se résoudre.
+- **P36** : avec Avast, Docker Hub lui-même est inaccessible par moments (`x509: certificate` / `DeadlineExceeded` sur `registry-1.docker.io`) et le débit conteneur tombe à ~370 kB/s. Validation Docker faite le 2026-09-16 avec Avast en pause (débit 8 Mo/s au lieu de 370 kB/s). Les Dockerfiles ont un cache pip partagé (`id=churnguard-pip`) + `wheels/` (bind mount, vide en CI) + `PIP_DEFAULT_TIMEOUT/RETRIES`.
+- **P34** : d'autres projets (`fraud-detection-*`, `food_impact_db`) occupent les ports 8080/5000/5432 → `docker stop` avant de lancer la stack ChurnGuard.
+- **P37** : **MLflow 3.x rejette tout Host ≠ localhost** (`403 Invalid Host header - possible DNS rebinding attack`) → depuis les conteneurs (`http://mlflow:5000`) l'API et Airflow ne peuvent pas joindre le registry. Obligatoire : `--allowed-hosts * --cors-allowed-origins *` dans la commande `mlflow server` (compose dev + prod).
+- **P38** : dépauser un DAG `schedule` hebdo lance immédiatement le dernier intervalle manqué (même avec `catchup=False`) → en démo, garder `auto_retraining` en pause et utiliser `airflow dags trigger`.
+- **P32** : `mlflow server` doit tourner avec `--serve-artifacts --artifacts-destination /mlruns` pour que les clients (host, API, Airflow) n'aient pas besoin du chemin `/mlruns` local.
+
+**Démo (validée)** : `airflow dags trigger auto_retraining` (DAG laissé **en pause** — le dépauser lance aussi le dernier intervalle hebdo manqué → double run, P38). `promote_model` réutilise la version déjà enregistrée par `train(auto_promote=False)` (plus de doublon v2→v4).
+
+**Reste à faire (côté Emeline)** : (1) rejouer la démo devant le jury depuis un registry propre (`down -v` → `up -d` → train baseline → `registry rollback --version 1` → trigger) ; (2) pousser les Spaces HF (`hf-space/`, `hf-airflow/`, `hf-mlflow/` mis à jour localement) ; (3) secrets GitHub `DAGSHUB_USER/TOKEN`, `HF_TOKEN` ; (4) `python scripts/bench_latency.py` pour le chiffre p95 ; (5) intégrer les schémas dans les slides.
+
+---
 
 ## Phase 7 — CI/CD GitHub Actions ✓
 
 **Fichier** : `.github/workflows/ci.yml`
 
-**Jobs** :
-- `test` : lint ruff + `pytest tests/test_api.py` — install légère (`requirements-api.txt` + pytest/ruff), pas d'airflow ni dvc
-- `build` : build image Docker + push GHCR (`ghcr.io/<org>/churnguard-api`) — tags `branch` + `branch-<sha>`
-- `deploy` : désactivé (`if: false`) — à activer Phase 10 après config secrets Hetzner
+**Jobs** (mis à jour Phase 10) :
+- `test` : `ruff check src/ tests/` + `pytest tests/` (hors `test_dags.py`) — install légère (`requirements-api.txt` + evidently + pytest/ruff), pas d'airflow
+- `validate-model` : `dvc pull model_artifacts.dvc` + `validate.py` F1 ≥ 0.75 sur `tests/fixtures/sample_test.csv` — ignoré avec warning sans secrets DagsHub
+- `build` : matrice 3 images (`churnguard-api`, `churnguard-mlflow`, `churnguard-airflow`) → GHCR `ghcr.io/emelineroblot/<image>` — tags `main` + `main-<sha>`
+- `deploy` : désactivé (`if: false`) — démo déployée sur HF Spaces via `deploy-model.yml`
 
-**Triggers** : push sur `develop` ou `main`, PR vers `main`
+**Triggers** : push / PR sur `main`, `workflow_dispatch`
 
-**Pitfall P14** : `test_preprocessing.py` cible l'ancien code rivalytics (5 tables, `load_all()`) — exclu du pipeline CI. À réécrire pour le dataset muhammadshahidazeem avant réactivation.
+**Pitfall P14** (résolu Phase 10) : `test_preprocessing.py` réécrit pour le dataset muhammadshahidazeem, réintégré au CI.
 
 **Pitfall P15** : `pip install -e ".[dev]"` installe apache-airflow → build CI > 5 min. Toujours utiliser `requirements-api.txt` pour les jobs de test.
 
@@ -71,7 +105,7 @@ final-project-dslead/
 
 **Fichiers** :
 - `src/monitoring/drift_report.py` — `generate_drift_report(reference, current, target_column=None, prediction_column=None)` : DataDriftPreset obligatoire, ClassificationPreset conditionnel si prediction_column fourni
-- `src/monitoring/alert.py` — `check_drift()` : génère le rapport si absent (données train vs test ou drifted), parse le JSON Evidently, retourne `True` si `drift_share > 0.2` ou F1 drop `> 0.05`
+- `src/monitoring/alert.py` — `run_drift_check()` → `DriftResult` ; `check_drift()` (bool, régénère toujours le rapport). Données courantes : chemin explicite → table `predictions` → `features_drifted.csv` → `features_incoming.csv`. Alerte si `share_of_drifted_columns > 0.2` ou F1 drop `> 0.05`
 
 **Déclenchement de la démo** :
 ```bash
@@ -82,7 +116,7 @@ python src/retraining/scripts/simulate_drift.py --noise 0.3
 python -c "from src.monitoring.alert import check_drift; print(check_drift())"
 ```
 
-**Pitfall P17** : `as_dict()` d'Evidently encode le nom de la metric sous la clé `"metric"` (ex: `"DatasetDriftMetric"`). Pour parser, tester `"DatasetDrift" in metric_name` (substring) plutôt que l'égalité stricte — le nom exact peut varier selon la version d'Evidently.
+**Pitfall P17** : `as_dict()` d'Evidently encode le nom de la metric sous la clé `"metric"` (ex: `"DatasetDriftMetric"`). Pour parser, tester `"DatasetDrift" in metric_name` (substring) plutôt que l'égalité stricte — le nom exact peut varier selon la version d'Evidently. **Et lire `share_of_drifted_columns`, pas `drift_share` (= seuil) — voir P23.**
 
 ---
 
@@ -90,11 +124,12 @@ python -c "from src.monitoring.alert import check_drift; print(check_drift())"
 
 **DAGs** :
 - `src/retraining/dags/batch_scoring_dag.py` — schedule `0 2 * * *` : charge le CSV test (500 premières lignes en démo), appelle `/predict/batch` par chunks de 100, simule l'envoi Mautic
-- `src/retraining/dags/retraining_dag.py` — schedule `0 3 * * 1` (lundi 3h) : `check_drift` (BranchPythonOperator) → `retrain_model` (`auto_promote=False`) → `evaluate_model` (F1 candidat vs Production via XCom) → `promote_or_rollback`
+- `src/retraining/dags/retraining_dag.py` — schedule `0 3 * * 1` (lundi 3h) : `check_drift` (dérive OU nouvelles lignes) → `retrain_model` (`auto_promote=False`, `extra_data_path`) → `evaluate_model` (F1 hold-out, seuil propre à chaque modèle) → `decide` → `promote_model` (reload API + smoke test + rollback si échec) / `keep_current`
 
 **Variables d'environnement Airflow** :
 - `CHURNGUARD_API_URL` : URL de l'API (défaut `http://api:8000` dans le conteneur Docker)
-- `MLFLOW_TRACKING_URI` : doit pointer vers le serveur MLflow (configuré dans docker-compose.yml)
+- `MLFLOW_TRACKING_URI` : `http://mlflow:5000` — défini dans `x-airflow-common` du compose dev (Phase 10 ; absent avant)
+- `DATABASE_URL`, `ALERT_WEBHOOK_URL`, `CHURNGUARD_ROOT=/opt/airflow`, `RETRAIN_REFERENCE_ROWS`, `NEW_DATA_MIN_ROWS`
 
 **Pitfall P18** : `train(auto_promote=False)` enregistre le modèle dans le Registry sans le transitionner en Production — indispensable pour que `evaluate_model` puisse comparer candidat vs Production courante avant de décider.
 
@@ -111,10 +146,11 @@ python -c "from src.monitoring.alert import check_drift; print(check_drift())"
 ## Phase 6 — Containerisation Docker ✓
 
 **Fichiers** :
-- `Dockerfile` — single-stage Python 3.11-slim, installe depuis `requirements-api.txt` uniquement
-- `Dockerfile.mlflow` — `ghcr.io/mlflow/mlflow:v2.13.0` + `psycopg2-binary` (absent de l'image officielle)
+- `Dockerfile` — Python 3.11-slim, non-root, HEALTHCHECK, installe depuis `requirements-api.txt` (pinné)
+- `Dockerfile.mlflow` — `python:3.11-slim` + `mlflow==3.12.0` + `psycopg2-binary`
+- `Dockerfile.airflow` — `apache/airflow:2.9.1-python3.11` + `requirements-airflow.txt` (mlflow, xgboost, sklearn, evidently)
 - `.dockerignore` — exclut `data/`, `mlruns/`, `.venv313/`, `notebooks/` du contexte de build
-- `requirements-api.txt` — 8 dépendances API seulement (pas airflow, pas dvc)
+- `requirements-api.txt` — dépendances API pinnées (pandas, sklearn, xgboost, mlflow 3.12.0, fastapi, sqlalchemy, psycopg2, prometheus) — pas airflow, pas dvc
 - `docker/dev/init-db.sql` — crée les bases `mlflow` et `airflow` au premier démarrage PostgreSQL
 
 **Pitfalls** : voir P10–P13 dans `contexte/problematiques-rencontrees.md`.
@@ -140,11 +176,11 @@ docker compose -f docker/dev/docker-compose.yml up -d --build api
 
 ## Phase 5 — API FastAPI ✓
 
-**Endpoints** : `GET /health`, `POST /predict`, `POST /predict/batch`, `GET /model/info`
+**Endpoints** : `GET /health`, `POST /predict`, `POST /predict/batch` (vectorisé, ≤ 5000), `GET /model/info`, `POST /model/reload`, `GET /metrics`
 
-**Pitfall** : MLflow logue XGBoost avec le flavor `xgboost` (pas `sklearn`). `mlflow.sklearn.load_model` échoue sur le modèle en Production. Fix : `_load_from_registry()` essaie sklearn puis xgboost en fallback (`src/api/main.py`).
+**Pitfall** : MLflow logue XGBoost avec le flavor `xgboost` (pas `sklearn`). `mlflow.sklearn.load_model` échoue sur le modèle en Production. Fix : `registry.load_model()` essaie sklearn puis xgboost en fallback.
 
-**Tests** : 4 tests dans `tests/test_api.py` — mock via `patch("src.api.main._load_from_registry", ...)` + `TestClient`. Lancer avec `.venv313/Scripts/python.exe -m pytest tests/test_api.py -v`
+**Tests** : 13 tests dans `tests/test_api.py` — mock via `patch("src.api.main.load_model_state", return_value=ModelState(...))` + `TestClient`. Lancer avec `.venv313/Scripts/python.exe -m pytest tests/ -v` (36 tests)
 
 **Venv** : `.venv313/` (Python 3.13, gitignored) — le `.venv/` original n'avait pas pip.
 
@@ -169,7 +205,7 @@ python -m src.training.train
 .venv313/Scripts/python.exe -m pytest tests/ -v
 
 # Lancer un test précis
-.venv313/Scripts/python.exe -m pytest tests/test_preprocessing.py::test_feature_engineering -v
+.venv313/Scripts/python.exe -m pytest tests/test_preprocessing.py::test_engineer_features_columns_and_order -v
 
 # Linter
 .venv313/Scripts/python.exe -m ruff check src/
@@ -178,11 +214,24 @@ python -m src.training.train
 dvc pull        # récupérer les données
 dvc push        # versionner les artefacts
 
-# MLflow — rollback vers une version précédente
+# MLflow — registry
+python -m src.training.registry list
 python -m src.training.registry rollback --version N
 
-# Simuler une dérive pour déclencher le réentraînement
-python src/retraining/scripts/simulate_drift.py
+# Contrôle de dérive (rapport Evidently + verdict)
+python -m src.monitoring.alert
+
+# Simuler une dérive amplifiée (optionnel — la dérive naturelle incoming vs train suffit)
+python -m src.retraining.scripts.simulate_drift --noise 0.3
+
+# Tuning XGBoost → best_params.json
+python -m src.training.tuner --sample 100000 --n-iter 20
+
+# Valider le modèle exporté (gate CI)
+python -m src.training.validate --model model_artifacts/model.joblib --data tests/fixtures/sample_test.csv
+
+# Bench latence API
+python scripts/bench_latency.py --url http://localhost:8001
 ```
 
 ## Stack technique
@@ -218,11 +267,11 @@ python src/retraining/scripts/simulate_drift.py
 - `Contract Length = Monthly` → **100% churn** — fuite de données probable. À encoder avec précaution ou exclure.
 - `Subscription Type` quasi non-discriminant (55.9–58.2% sur toutes les modalités).
 - `Tenure` et `Usage Frequency` corrélations faibles (< 0.06) malgré p-values significatives (effet volume).
-- Train/test split déjà fourni — utiliser les fichiers tels quels, pas de re-split.
+- Train/test split fourni **mais distributions différentes** (voir Phase 10) : test scindé en incoming (réentraînement) / hold-out (évaluation).
 
 ### Feature Engineering Phase 2 — implémenté ✓
 
-**16 features produites** (`data/processed/features_engineered.csv`) :
+**15 features + cible** (`data/processed/features_engineered.csv`) — ordre canonique dans `FEATURE_COLUMNS` (`features.py`) = ordre d'entraînement du modèle (one-hot trié alphabétiquement : Basic, Premium, Standard) :
 
 | Type | Colonnes |
 |---|---|
@@ -241,7 +290,7 @@ python src/retraining/scripts/simulate_drift.py
 - `cleaner.py` : `clean()` — drop CustomerID, dropna, encode Gender
 - `features.py` : `engineer_features()` — features dérivées + encodages + rename target
 - `pipeline.py` : `run()` — orchestre et exporte train + test processés
-- `merger.py` : **déprécié** (dataset plat, plus de jointures)
+- `merger.py` : supprimé Phase 10 (dataset plat)
 
 ## Architecture des modules clés
 
@@ -276,7 +325,7 @@ python src/retraining/scripts/simulate_drift.py
 - Python 3.11, snake_case, type hints 3.9+
 - Pas de mock de base de données dans les tests
 - Docker Compose séparés dev/prod — jamais `docker/docker-compose.yml`
-- `contexte/` et `.claude/` exclus du gitignore (documents de cadrage non versionnés)
+- `contexte/`, `.claude/`, `docs/soutenance*`, `docs/audit.md` exclus par le gitignore ; le reste de `docs/` est versionné (livrables jury)
 - Modèle MLflow Registry nommé `churnguard-model`, stage `Production` = modèle actif servi par l'API
 
 ## Phase 4 — DVC Versioning ✓
@@ -286,8 +335,10 @@ python src/retraining/scripts/simulate_drift.py
 **Fichiers trackés** (64 MB) :
 - `data/customer_churn_dataset-training-master.csv` (22 MB) — raw train
 - `data/customer_churn_dataset-testing-master.csv` (3 MB) — raw test
-- `data/processed/features_engineered.csv` (35 MB) — features train
-- `data/processed/features_engineered_test.csv` (4 MB) — features test
+- `data/processed/features_engineered.csv` (35 MB) — features train (référence) — via `dvc.yaml` stage `preprocess` (dvc.lock)
+- `data/processed/features_incoming.csv` (2 MB) — nouvelles données de production labellisées (½ test Kaggle)
+- `data/processed/features_engineered_test.csv` (2 MB) — hold-out (½ test Kaggle)
+- `model_artifacts/` — modèle exporté + `model_info.json` (`model_artifacts.dvc`)
 
 **Auth DagsHub** : stockée dans `.dvc/config.local` (gitignored). À reconfigurer sur nouvelle machine :
 ```bash
@@ -296,7 +347,7 @@ python -m dvc remote modify dagshub --local user emelineroblot
 python -m dvc remote modify dagshub --local password <token>
 ```
 
-**Note env** : DVC installé dans Python système (3.13). Le `.venv` original n'avait pas pip — remplacé par `.venv313/` (Python 3.13, toutes dépendances installées). Voir P7 + P9 dans `contexte/problematiques-rencontrees.md`.
+**Note env** : DVC 3.67.1 dans `.venv313/` (`python -m dvc`). Le `.venv` original n'avait pas pip — remplacé par `.venv313/` (Python 3.13, toutes dépendances installées). Voir P7 + P9 dans `contexte/problematiques-rencontrees.md`.
 
 ---
 
@@ -308,17 +359,17 @@ python -m dvc remote modify dagshub --local password <token>
 | RandomForest | 0.992 | 0.999 | 0.23 |
 | **XGBoost** | **0.999** | **1.000** | **0.15** |
 
-**Modèle en Production** : XGBoost, version 3 du registry MLflow (`churnguard-model`).
+**⚠️ Ces scores sont mesurés sur un split du fichier train.** Sur le hold-out (fichier test Kaggle, distribution différente) le même XGBoost fait **F1 0.657 / AUC 0.731**. Après réentraînement avec la fenêtre récente (Phase 10) : **F1 0.978 / AUC 0.995**. Voir `docs/model-card.md`.
 
-**Note performances** : F1 quasi-parfait attendu sur dataset synthétique (les features reconstruisent presque parfaitement la cible). Contract Length = 12.5% de l'importance — pas la cause principale, voir P5 dans problematiques-rencontrees.md.
+**Modèle en Production (stack Docker, 2026-09-16)** : v5 (réentraîné par le DAG, F1 hold-out 0.9777, seuil 0.89) ; v1 = baseline archivée (F1 0.6566). `model_artifacts/` (DVC) contient le modèle réentraîné (F1 hold-out 0.978, seuil 0.89).
 
 Top features XGBoost (importance) : Total Spend (21%) > Support Calls (18%) > Contract Length (12%) > payment_risk_score (11%) > Payment Delay (10%).
 
 ## Objectifs de performance modèle
 
 - F1-score ≥ 0,75 sur le dataset muhammadshahidazeem ✓ (atteint : 0.999)
-- Latence API < 200ms
-- Rollback MLflow en < 5 minutes
+- Latence API < 200ms ✓ (mesuré 2026-09-16 : p95 59 ms sur /predict, 1 000 comptes en 110 ms)
+- Rollback MLflow en < 5 minutes ✓ (mesuré : 6 s, registry + `/model/reload`)
 
 ## Périmètre exclu
 

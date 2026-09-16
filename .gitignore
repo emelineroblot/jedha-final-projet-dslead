@@ -16,6 +16,7 @@ data/**/*.csv
 mlruns/
 reports/*.html
 reports/*.json
+reports/history/
 
 # Artefacts modèle exportés (poussés sur HF Space, pas dans le repo principal)
 model_artifacts/
@@ -45,12 +46,14 @@ Thumbs.db
 # Claude & contexte (documents de cadrage, non versionnés)
 contexte/
 .claude/
-docs/
+docs/soutenance*
+docs/audit.md
 .mcp.json
 
 # Secrets
 .env
 .env.*
+!.env.example
 secrets/
 
 # Logs
@@ -63,3 +66,14 @@ logs/
 # DVC cache
 .dvc/cache/
 .dvc/tmp/
+/model_artifacts
+
+# Overrides compose locaux (build args machine-spécifiques, ex. Avast)
+docker/**/docker-compose.override.yml
+
+# Overrides compose locaux (build args machine-spécifiques, ex. Avast) — garder le .example
+docker/**/docker-compose.override.yml
+
+# Wheels pré-téléchargés pour les builds Docker hors-ligne (voir P33) — dossier vide en CI
+wheels/*
+!wheels/.gitkeep

@@ -1,0 +1,23 @@
+# Override LOCAL (gitignoré) — machine avec Avast : pip ne peut pas vérifier le certificat PyPI dans les conteneurs.
+# Chargé automatiquement par docker compose avec docker-compose.yml du même dossier.
+services:
+  api:
+    build:
+      args:
+        PIP_TRUSTED_HOST: "pypi.org files.pythonhosted.org"
+  mlflow:
+    build:
+      args:
+        PIP_TRUSTED_HOST: "pypi.org files.pythonhosted.org"
+  airflow-init:
+    build:
+      args:
+        PIP_TRUSTED_HOST: "pypi.org files.pythonhosted.org"
+  airflow-webserver:
+    build:
+      args:
+        PIP_TRUSTED_HOST: "pypi.org files.pythonhosted.org"
+  airflow-scheduler:
+    build:
+      args:
+        PIP_TRUSTED_HOST: "pypi.org files.pythonhosted.org"

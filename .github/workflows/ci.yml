@@ -2,35 +2,79 @@ name: CI/CD ChurnGuard
 
 on:
   push:
-    branches: [develop, main]
+    branches: [main]
   pull_request:
     branches: [main]
+  workflow_dispatch:
 
 env:
   REGISTRY: ghcr.io
-  IMAGE_NAME: ${{ github.repository }}/churnguard-api
+  PYTHON_VERSION: "3.11"
 
 jobs:
+  # 1. Qualité du code + tests unitaires (API mockée, preprocessing, monitoring, DAGs)
   test:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
-          python-version: "3.11"
-      - name: Install dependencies
-        run: pip install -r requirements-api.txt pytest pytest-asyncio ruff httpx
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: pip
+      - name: Install dependencies (API + test tooling, sans Airflow)
+        run: pip install -r requirements-api.txt pytest==9.0.3 ruff==0.15.13 evidently==0.7.21
       - name: Lint
-        run: ruff check src/
+        run: ruff check src/ tests/
       - name: Tests
-        run: pytest tests/test_api.py -v
+        run: pytest tests/ -v --ignore=tests/test_dags.py
 
-  build:
+  # 2. Validation du modèle : F1 sur un échantillon labellisé ≥ 0.75, sinon pas d'image.
+  #    Le modèle est récupéré depuis le remote DVC (DagsHub) — secrets DAGSHUB_USER / DAGSHUB_TOKEN.
+  validate-model:
     needs: test
+    runs-on: ubuntu-latest
+    env:
+      DAGSHUB_USER: ${{ secrets.DAGSHUB_USER }}
+      DAGSHUB_TOKEN: ${{ secrets.DAGSHUB_TOKEN }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: pip
+      - name: Install dependencies
+        run: pip install -r requirements-api.txt dvc==3.67.1
+      - name: Pull model artefact (DVC)
+        if: env.DAGSHUB_TOKEN != ''
+        run: |
+          dvc remote modify dagshub --local auth basic
+          dvc remote modify dagshub --local user "$DAGSHUB_USER"
+          dvc remote modify dagshub --local password "$DAGSHUB_TOKEN"
+          dvc pull model_artifacts.dvc
+      - name: Validate model (F1 ≥ 0.75 on labelled sample)
+        if: env.DAGSHUB_TOKEN != ''
+        run: python -m src.training.validate --model model_artifacts/model.joblib --data tests/fixtures/sample_test.csv --min-f1 0.75
+      - name: Skipped (no DagsHub secrets)
+        if: env.DAGSHUB_TOKEN == ''
+        run: echo "::warning::DAGSHUB_TOKEN absent — validation du modèle ignorée"
+
+  # 3. Build + push des images (API, MLflow, Airflow) sur GHCR — uniquement sur main
+  build:
+    needs: [test, validate-model]
+    if: github.event_name != 'pull_request'
     runs-on: ubuntu-latest
     permissions:
       contents: read
       packages: write
+    strategy:
+      matrix:
+        include:
+          - name: churnguard-api
+            dockerfile: Dockerfile
+          - name: churnguard-mlflow
+            dockerfile: Dockerfile.mlflow
+          - name: churnguard-airflow
+            dockerfile: Dockerfile.airflow
     steps:
       - uses: actions/checkout@v4
       - name: Log in to GHCR
@@ -43,7 +87,7 @@ jobs:
         id: meta
         uses: docker/metadata-action@v5
         with:
-          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+          images: ${{ env.REGISTRY }}/${{ github.repository_owner }}/${{ matrix.name }}
           tags: |
             type=ref,event=branch
             type=sha,prefix={{branch}}-
@@ -51,11 +95,15 @@ jobs:
         uses: docker/build-push-action@v5
         with:
           context: .
+          file: ${{ matrix.dockerfile }}
           push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
 
-  # Activé Phase 10 — nécessite secrets HETZNER_HOST + HETZNER_SSH_KEY
+  # 4. Déploiement VPS Hetzner — désactivé (démo déployée sur HuggingFace Spaces, voir deploy-model.yml).
+  #    Pour activer : secrets HETZNER_HOST + HETZNER_SSH_KEY, puis remplacer `if: false` par `if: github.ref == 'refs/heads/main'`.
   deploy:
     needs: build
     if: false
@@ -69,5 +117,6 @@ jobs:
           key: ${{ secrets.HETZNER_SSH_KEY }}
           script: |
             cd /opt/churnguard
+            git pull
             docker compose -f docker/prod/docker-compose.yml pull
             docker compose -f docker/prod/docker-compose.yml up -d

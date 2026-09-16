@@ -1,5 +1,30 @@
 name: churnguard-dev
 
+# Variables optionnelles (fichier docker/dev/.env ou environnement) :
+#   ALERT_WEBHOOK_URL  — webhook Discord/Slack pour les alertes de dérive / promotion
+x-airflow-common: &airflow-common
+  build:
+    context: ../..
+    dockerfile: Dockerfile.airflow
+  environment: &airflow-env
+    AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql+psycopg2://churnguard:churnguard@postgres:5432/airflow
+    AIRFLOW__CORE__EXECUTOR: LocalExecutor
+    AIRFLOW__CORE__LOAD_EXAMPLES: "False"
+    AIRFLOW__WEBSERVER__SECRET_KEY: churnguard-secret-key
+    # Accès aux services ChurnGuard depuis les tâches
+    MLFLOW_TRACKING_URI: http://mlflow:5000
+    CHURNGUARD_API_URL: http://api:8000
+    DATABASE_URL: postgresql://churnguard:churnguard@postgres:5432/churnguard
+    ALERT_WEBHOOK_URL: ${ALERT_WEBHOOK_URL:-}
+    CHURNGUARD_ROOT: /opt/airflow
+    PYTHONPATH: /opt/airflow
+  volumes:
+    - ../../src/retraining/dags:/opt/airflow/dags
+    - ../../src:/opt/airflow/src
+    - ../../data:/opt/airflow/data
+    - ../../reports:/opt/airflow/reports
+    - ../../mlruns:/mlruns
+
 services:
 
   postgres:
@@ -11,6 +36,8 @@ services:
     volumes:
       - postgres_data:/var/lib/postgresql/data
       - ./init-db.sql:/docker-entrypoint-initdb.d/init-db.sql
+    ports:
+      - "5432:5432"
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U churnguard"]
       interval: 5s
@@ -23,7 +50,10 @@ services:
     command: >
       mlflow server
       --backend-store-uri postgresql://churnguard:churnguard@postgres:5432/mlflow
-      --default-artifact-root /mlruns
+      --serve-artifacts
+      --artifacts-destination /mlruns
+      --allowed-hosts *
+      --cors-allowed-origins *
       --host 0.0.0.0
       --port 5000
     ports:
@@ -33,30 +63,39 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://localhost:5000/health')\""]
+      interval: 10s
+      retries: 10
 
   api:
     build:
       context: ../..
       dockerfile: Dockerfile
     ports:
-      - "8001:8000"
+      - "8001:8000"   # 8000 est occupé par SeoLap sur la machine de dev
     environment:
       MLFLOW_TRACKING_URI: http://mlflow:5000
       MLFLOW_MODEL_NAME: churnguard-model
       MLFLOW_MODEL_STAGE: Production
+      DATABASE_URL: postgresql://churnguard:churnguard@postgres:5432/churnguard
+      LOG_LEVEL: INFO
     volumes:
       - ../../src:/app/src
-      - ../../data:/app/data
+      - ../../mlruns:/mlruns
     depends_on:
-      - mlflow
+      mlflow:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
     command: uvicorn src.api.main:app --host 0.0.0.0 --port 8000 --reload
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://localhost:8000/health')\""]
+      interval: 10s
+      retries: 10
 
   airflow-init:
-    image: apache/airflow:2.9.1
-    environment:
-      AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql+psycopg2://churnguard:churnguard@postgres:5432/airflow
-      AIRFLOW__CORE__EXECUTOR: LocalExecutor
-      AIRFLOW__WEBSERVER__SECRET_KEY: churnguard-secret-key
+    <<: *airflow-common
     command:
       - bash
       - -c
@@ -75,31 +114,21 @@ services:
         condition: service_healthy
 
   airflow-webserver:
-    image: apache/airflow:2.9.1
+    <<: *airflow-common
     ports:
       - "8080:8080"
-    environment:
-      AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql+psycopg2://churnguard:churnguard@postgres:5432/airflow
-      AIRFLOW__CORE__EXECUTOR: LocalExecutor
-      AIRFLOW__WEBSERVER__SECRET_KEY: churnguard-secret-key
-    volumes:
-      - ../../src/retraining/dags:/opt/airflow/dags
     depends_on:
       airflow-init:
         condition: service_completed_successfully
     command: webserver
 
   airflow-scheduler:
-    image: apache/airflow:2.9.1
-    environment:
-      AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql+psycopg2://churnguard:churnguard@postgres:5432/airflow
-      AIRFLOW__CORE__EXECUTOR: LocalExecutor
-      AIRFLOW__WEBSERVER__SECRET_KEY: churnguard-secret-key
-    volumes:
-      - ../../src/retraining/dags:/opt/airflow/dags
+    <<: *airflow-common
     depends_on:
       airflow-init:
         condition: service_completed_successfully
+      api:
+        condition: service_healthy
     command: scheduler
 
 volumes:

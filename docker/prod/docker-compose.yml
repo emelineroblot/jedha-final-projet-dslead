@@ -1,5 +1,28 @@
 name: churnguard-prod
 
+# Stack de production (VPS Hetzner). Variables lues depuis docker/prod/.env — voir .env.example.
+# Différences avec dev : images pré-construites (GHCR), pas de hot-reload, restart: always,
+# API sur le port 8000, secrets externalisés.
+x-airflow-common: &airflow-common
+  image: ${AIRFLOW_IMAGE:-ghcr.io/emelineroblot/churnguard-airflow:main}
+  environment: &airflow-env
+    AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql+psycopg2://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/airflow
+    AIRFLOW__CORE__EXECUTOR: LocalExecutor
+    AIRFLOW__CORE__LOAD_EXAMPLES: "False"
+    AIRFLOW__WEBSERVER__SECRET_KEY: ${AIRFLOW_SECRET_KEY}
+    MLFLOW_TRACKING_URI: http://mlflow:5000
+    CHURNGUARD_API_URL: http://api:8000
+    DATABASE_URL: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/churnguard
+    ALERT_WEBHOOK_URL: ${ALERT_WEBHOOK_URL:-}
+    CHURNGUARD_ROOT: /opt/airflow
+    PYTHONPATH: /opt/airflow
+  volumes:
+    - ${CHURNGUARD_HOME:-/opt/churnguard}/src/retraining/dags:/opt/airflow/dags
+    - ${CHURNGUARD_HOME:-/opt/churnguard}/src:/opt/airflow/src
+    - ${CHURNGUARD_HOME:-/opt/churnguard}/data:/opt/airflow/data
+    - reports:/opt/airflow/reports
+  restart: always
+
 services:
 
   postgres:
@@ -7,9 +30,10 @@ services:
     environment:
       POSTGRES_USER: ${POSTGRES_USER}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
-      POSTGRES_DB: ${POSTGRES_DB}
+      POSTGRES_DB: churnguard
     volumes:
       - postgres_data:/var/lib/postgresql/data
+      - ../dev/init-db.sql:/docker-entrypoint-initdb.d/init-db.sql   # crée les bases mlflow + airflow
     restart: always
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER}"]
@@ -17,11 +41,14 @@ services:
       retries: 5
 
   mlflow:
-    image: ghcr.io/mlflow/mlflow:v2.13.0
+    image: ${MLFLOW_IMAGE:-ghcr.io/emelineroblot/churnguard-mlflow:main}
     command: >
       mlflow server
-      --backend-store-uri postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
-      --default-artifact-root /mlruns
+      --backend-store-uri postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/mlflow
+      --serve-artifacts
+      --artifacts-destination /mlruns
+      --allowed-hosts *
+      --cors-allowed-origins *
       --host 0.0.0.0
       --port 5000
     volumes:
@@ -30,48 +57,63 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://localhost:5000/health')\""]
+      interval: 10s
+      retries: 10
 
   api:
-    image: ${API_IMAGE}
+    image: ${API_IMAGE:-ghcr.io/emelineroblot/churnguard-api:main}
     ports:
       - "8000:8000"
     environment:
       MLFLOW_TRACKING_URI: http://mlflow:5000
       MLFLOW_MODEL_NAME: churnguard-model
       MLFLOW_MODEL_STAGE: Production
+      DATABASE_URL: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/churnguard
+    command: uvicorn src.api.main:app --host 0.0.0.0 --port 8000 --workers ${API_WORKERS:-2}
     restart: always
     depends_on:
-      - mlflow
+      mlflow:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://localhost:8000/health')\""]
+      interval: 10s
+      retries: 10
+
+  airflow-init:
+    <<: *airflow-common
+    restart: "no"
+    command:
+      - bash
+      - -c
+      - |
+        airflow db migrate
+        airflow users create --username ${AIRFLOW_USER} --password ${AIRFLOW_PASSWORD} \
+          --firstname Admin --lastname User --role Admin --email admin@churnguard.local || true
+    depends_on:
+      postgres:
+        condition: service_healthy
 
   airflow-webserver:
-    image: apache/airflow:2.9.1
+    <<: *airflow-common
     ports:
       - "8080:8080"
-    environment:
-      AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql+psycopg2://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
-      AIRFLOW__CORE__EXECUTOR: LocalExecutor
-    volumes:
-      - airflow_dags:/opt/airflow/dags
-    restart: always
-    depends_on:
-      postgres:
-        condition: service_healthy
     command: webserver
+    depends_on:
+      airflow-init:
+        condition: service_completed_successfully
 
   airflow-scheduler:
-    image: apache/airflow:2.9.1
-    environment:
-      AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql+psycopg2://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
-      AIRFLOW__CORE__EXECUTOR: LocalExecutor
-    volumes:
-      - airflow_dags:/opt/airflow/dags
-    restart: always
-    depends_on:
-      postgres:
-        condition: service_healthy
+    <<: *airflow-common
     command: scheduler
+    depends_on:
+      airflow-init:
+        condition: service_completed_successfully
+      api:
+        condition: service_healthy
 
 volumes:
   postgres_data:
   mlruns:
-  airflow_dags:
+  reports:

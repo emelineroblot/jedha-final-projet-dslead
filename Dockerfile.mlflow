@@ -1,2 +1,11 @@
+# Serveur MLflow (Tracking + Model Registry). Même version majeure que le client (requirements-api.txt).
+# psycopg2-binary : driver PostgreSQL absent de l'image officielle ghcr.io/mlflow/mlflow.
 FROM python:3.11-slim
-RUN pip install --no-cache-dir mlflow==3.12.0 psycopg2-binary
+# Réseau avec inspection TLS (Avast, proxy d'entreprise) : passer --build-arg PIP_TRUSTED_HOST="pypi.org files.pythonhosted.org"
+# (vide par défaut → pip vérifie normalement les certificats, comme en CI)
+ARG PIP_TRUSTED_HOST=""
+ENV PIP_TRUSTED_HOST=${PIP_TRUSTED_HOST} PIP_DEFAULT_TIMEOUT=180 PIP_RETRIES=10
+# wheels/ : wheels Linux pré-téléchargés sur l'hôte (réseau lent/intercepté) — vide en CI → PyPI
+RUN --mount=type=cache,id=churnguard-pip,target=/root/.cache/pip --mount=type=bind,source=wheels,target=/wheels \
+    pip install --find-links /wheels mlflow==3.12.0 psycopg2-binary==2.9.13
+EXPOSE 5000

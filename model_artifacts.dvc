@@ -1,0 +1,6 @@
+outs:
+- md5: 046cc44c9e53eff8cbb4c1340c14dcb4.dir
+  size: 344826
+  nfiles: 2
+  hash: md5
+  path: model_artifacts

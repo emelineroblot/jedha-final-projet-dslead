@@ -1,0 +1,23 @@
+# Image Airflow capable d'exécuter les tâches ChurnGuard (entraînement, Evidently, MLflow).
+# Python 3.11 obligatoire : mlflow 3.x / xgboost 3.x / numpy 2.x ne supportent plus 3.8 (tag par défaut).
+FROM apache/airflow:2.9.1-python3.11
+
+USER root
+RUN apt-get update && apt-get install -y --no-install-recommends git libgomp1 \
+    && rm -rf /var/lib/apt/lists/*
+USER airflow
+
+# Réseau avec inspection TLS (Avast, proxy d'entreprise) : passer --build-arg PIP_TRUSTED_HOST="pypi.org files.pythonhosted.org"
+# (vide par défaut → pip vérifie normalement les certificats, comme en CI)
+ARG PIP_TRUSTED_HOST=""
+ENV PIP_TRUSTED_HOST=${PIP_TRUSTED_HOST} PIP_DEFAULT_TIMEOUT=180 PIP_RETRIES=10
+COPY requirements-airflow.txt /tmp/requirements-airflow.txt
+# wheels/ : wheels Linux pré-téléchargés sur l'hôte (réseau lent/intercepté) — vide en CI → PyPI
+RUN --mount=type=cache,id=churnguard-pip,target=/home/airflow/.cache/pip,uid=50000,gid=0 --mount=type=bind,source=wheels,target=/wheels \
+    pip install --find-links /wheels -r /tmp/requirements-airflow.txt
+
+# src/, data/ et reports/ sont montés dans /opt/airflow (docker-compose) ;
+# CHURNGUARD_ROOT permet à src/paths.py de les retrouver.
+ENV PYTHONPATH=/opt/airflow \
+    CHURNGUARD_ROOT=/opt/airflow \
+    AIRFLOW__CORE__LOAD_EXAMPLES=False

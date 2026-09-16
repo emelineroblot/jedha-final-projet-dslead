@@ -48,6 +48,9 @@ contexte/
 .claude/
 docs/soutenance*
 docs/audit.md
+docs/journal-session.md
+docs/livrables-soutenances.md
+docs/attendus-theoriques.md
 .mcp.json
 
 # Secrets

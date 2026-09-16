@@ -325,7 +325,7 @@ python scripts/bench_latency.py --url http://localhost:8001
 - Python 3.11, snake_case, type hints 3.9+
 - Pas de mock de base de données dans les tests
 - Docker Compose séparés dev/prod — jamais `docker/docker-compose.yml`
-- `contexte/`, `.claude/`, `docs/soutenance*`, `docs/audit.md` exclus par le gitignore ; le reste de `docs/` est versionné (livrables jury)
+- `contexte/`, `.claude/`, `docs/soutenance*`, `docs/audit.md`, `docs/journal-session.md`, `docs/livrables-soutenances.md`, `docs/attendus-theoriques.md` exclus par le gitignore (documents de travail soutenance, même structure que le projet spotify-data-governance) ; le reste de `docs/` est versionné (livrables jury)
 - Modèle MLflow Registry nommé `churnguard-model`, stage `Production` = modèle actif servi par l'API
 
 ## Phase 4 — DVC Versioning ✓

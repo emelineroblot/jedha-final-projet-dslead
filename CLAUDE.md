@@ -59,7 +59,7 @@ Audit complet vs énoncé Jedha dans `docs/audit.md` (non versionné). Correctio
 - **Bug Evidently (P23)** : `drift_share` dans `DatasetDriftMetric` = le SEUIL paramétré (0.5), pas la part observée → l'ancien `check_drift` détectait toujours une dérive. Utiliser `share_of_drifted_columns`.
 - **Bug rapport figé (P24)** : `check_drift` ne régénérait le rapport que s'il était absent → verdict figé. Désormais toujours régénéré (+ copie horodatée `reports/history/`).
 - **Réentraînement sur les mêmes données (P25)** : `train()` relisait toujours le même CSV → candidat = prod, jamais promu. Désormais `train(extra_data_path=…, reference_rows=100k)` : validation/seuil calibrés sur la fenêtre récente. Résultat hold-out : **0.657 → 0.978** (XGBoost), RF 0.973, LogReg 0.753.
-- **DAGs non exécutables dans Docker (P26)** : image Airflow stock sans deps ML ni `src/`. → `Dockerfile.airflow` (`apache/airflow:2.9.1-python3.11` + `requirements-airflow.txt`), mounts `src/ data/ reports/ mlruns/`, `CHURNGUARD_ROOT=/opt/airflow`, `MLFLOW_TRACKING_URI` + `CHURNGUARD_API_URL` dans l'env Airflow. **Stack Docker non revalidée en live — Avast bloque pip/Docker Hub dans les conteneurs (P33/P36). Seule l'image `churnguard-dev-mlflow` a été construite. À rejouer Web Shield en pause : `docker compose -f docker/dev/docker-compose.yml up -d --build`.**
+- **DAGs non exécutables dans Docker (P26)** : image Airflow stock sans deps ML ni `src/`. → `Dockerfile.airflow` (`apache/airflow:2.9.1-python3.11` + `requirements-airflow.txt`), mounts `src/ data/ reports/ mlruns/`, `CHURNGUARD_ROOT=/opt/airflow`, `MLFLOW_TRACKING_URI` + `CHURNGUARD_API_URL` dans l'env Airflow. **Stack Docker validée en live le 2026-09-16** (Avast en pause) : DAGs importés sans erreur, `check_drift` dans le conteneur = 60 % de features en dérive, DAG `auto_retraining` vert de bout en bout (candidat F1 0.9777 vs prod 0.6566 → v5 promue → `/model/reload` → smoke test OK → alerte), rollback v5→v1→v5 en 6 s, `batch_scoring` OK (500 comptes, 399 à risque élevé), 503 prédictions en base et **contrôle de dérive alimenté par la table `predictions`**, latence p95 59 ms / 1 000 comptes en 110 ms.
 
 **Nouveautés** : `src/paths.py` (chemins via `CHURNGUARD_ROOT`) · `FEATURE_COLUMNS` canonique (`features.py`, ordre = modèle) · API : `Features` Pydantic typée (422), batch vectorisé, `POST /model/reload`, `/metrics` Prometheus, latence loguée, stockage des prédictions (`store.py`, `DATABASE_URL`) · `notify.py` (webhook `ALERT_WEBHOOK_URL`) · `registry.py` CLI (`list/promote/rollback`) · `tuner.py` (RandomizedSearchCV → `best_params.json`) · `validate.py` (gate CI F1 ≥ 0.75) · `evaluate.py` (métriques + figures + importance) · lineage MLflow (`git_sha`, `data_dvc_md5` via dvc.lock) · `dvc.yaml` (preprocess → train) · `model_artifacts.dvc` · DAG retraining : trigger dérive OU ≥ 5000 nouvelles lignes, rollback réel + smoke test + reload API · CI : triggers `main`, `validate-model`, build 3 images, `deploy-model.yml` (HF Space) · docs : `docs/architecture/*.svg` (5 schémas), `api.md`, `dataset-report.md`, `model-card.md` · 36 tests.
 
@@ -71,11 +71,15 @@ Audit complet vs énoncé Jedha dans `docs/audit.md` (non versionné). Correctio
 - **P31** : `docs/` versionné sauf `docs/soutenance*` et `docs/audit.md` (gitignore). `.env.example` autorisé malgré `.env.*`.
 - **P33 (machine Emeline)** : **Avast intercepte le TLS** → `pip` dans les conteneurs échoue (`CERTIFICATE_VERIFY_FAILED` sur pypi.org). Les Dockerfiles acceptent `--build-arg PIP_TRUSTED_HOST="pypi.org files.pythonhosted.org"` (vide par défaut = CI normale). En local : `docker compose -f docker/dev/docker-compose.yml -f docker/dev/docker-compose.override.yml build` (override gitignoré, modèle dans `.override.yml.example`). Compose ne charge PAS l'override automatiquement quand `-f` est utilisé.
 - **P35** : `mlflow-skinny 3.12.0` exige `starlette<1` → `fastapi==0.116.1` + `prometheus-fastapi-instrumentator==7.1.0` (pas 0.136 / 8.1). Le venv local était incohérent (`pip check`) mais fonctionnait par chance ; l'image Docker, elle, refusait de se résoudre.
-- **P36** : avec Avast, Docker Hub lui-même est inaccessible par moments (`x509: certificate` / `DeadlineExceeded` sur `registry-1.docker.io`) et le débit conteneur tombe à ~370 kB/s. **Validation Docker de la Phase 10 NON faite** (session du 2026-09-15) : à rejouer avec le Web Shield Avast en pause. Les Dockerfiles ont un cache pip partagé (`id=churnguard-pip`) + `wheels/` (bind mount, vide en CI) + `PIP_DEFAULT_TIMEOUT/RETRIES`.
+- **P36** : avec Avast, Docker Hub lui-même est inaccessible par moments (`x509: certificate` / `DeadlineExceeded` sur `registry-1.docker.io`) et le débit conteneur tombe à ~370 kB/s. Validation Docker faite le 2026-09-16 avec Avast en pause (débit 8 Mo/s au lieu de 370 kB/s). Les Dockerfiles ont un cache pip partagé (`id=churnguard-pip`) + `wheels/` (bind mount, vide en CI) + `PIP_DEFAULT_TIMEOUT/RETRIES`.
 - **P34** : d'autres projets (`fraud-detection-*`, `food_impact_db`) occupent les ports 8080/5000/5432 → `docker stop` avant de lancer la stack ChurnGuard.
+- **P37** : **MLflow 3.x rejette tout Host ≠ localhost** (`403 Invalid Host header - possible DNS rebinding attack`) → depuis les conteneurs (`http://mlflow:5000`) l'API et Airflow ne peuvent pas joindre le registry. Obligatoire : `--allowed-hosts * --cors-allowed-origins *` dans la commande `mlflow server` (compose dev + prod).
+- **P38** : dépauser un DAG `schedule` hebdo lance immédiatement le dernier intervalle manqué (même avec `catchup=False`) → en démo, garder `auto_retraining` en pause et utiliser `airflow dags trigger`.
 - **P32** : `mlflow server` doit tourner avec `--serve-artifacts --artifacts-destination /mlruns` pour que les clients (host, API, Airflow) n'aient pas besoin du chemin `/mlruns` local.
 
-**Reste à faire (côté Emeline)** : (1) `docker compose -f docker/dev/docker-compose.yml up -d --build` puis rejouer la démo (train → promote → alert → trigger `auto_retraining` → vérifier promotion + `/model/info`) ; (2) pousser les Spaces HF (`hf-space/`, `hf-airflow/`, `hf-mlflow/` mis à jour localement) ; (3) secrets GitHub `DAGSHUB_USER/TOKEN`, `HF_TOKEN` ; (4) `python scripts/bench_latency.py` pour le chiffre p95 ; (5) intégrer les schémas dans les slides.
+**Démo (validée)** : `airflow dags trigger auto_retraining` (DAG laissé **en pause** — le dépauser lance aussi le dernier intervalle hebdo manqué → double run, P38). `promote_model` réutilise la version déjà enregistrée par `train(auto_promote=False)` (plus de doublon v2→v4).
+
+**Reste à faire (côté Emeline)** : (1) rejouer la démo devant le jury depuis un registry propre (`down -v` → `up -d` → train baseline → `registry rollback --version 1` → trigger) ; (2) pousser les Spaces HF (`hf-space/`, `hf-airflow/`, `hf-mlflow/` mis à jour localement) ; (3) secrets GitHub `DAGSHUB_USER/TOKEN`, `HF_TOKEN` ; (4) `python scripts/bench_latency.py` pour le chiffre p95 ; (5) intégrer les schémas dans les slides.
 
 ---
 
@@ -357,15 +361,15 @@ python -m dvc remote modify dagshub --local password <token>
 
 **⚠️ Ces scores sont mesurés sur un split du fichier train.** Sur le hold-out (fichier test Kaggle, distribution différente) le même XGBoost fait **F1 0.657 / AUC 0.731**. Après réentraînement avec la fenêtre récente (Phase 10) : **F1 0.978 / AUC 0.995**. Voir `docs/model-card.md`.
 
-**Modèle en Production (stack Docker)** : v4 du registry (entraîné sur référence seule) — à réentraîner via le DAG pour la démo. `model_artifacts/` (DVC) contient le modèle réentraîné (F1 hold-out 0.978, seuil 0.89).
+**Modèle en Production (stack Docker, 2026-09-16)** : v5 (réentraîné par le DAG, F1 hold-out 0.9777, seuil 0.89) ; v1 = baseline archivée (F1 0.6566). `model_artifacts/` (DVC) contient le modèle réentraîné (F1 hold-out 0.978, seuil 0.89).
 
 Top features XGBoost (importance) : Total Spend (21%) > Support Calls (18%) > Contract Length (12%) > payment_risk_score (11%) > Payment Delay (10%).
 
 ## Objectifs de performance modèle
 
 - F1-score ≥ 0,75 sur le dataset muhammadshahidazeem ✓ (atteint : 0.999)
-- Latence API < 200ms
-- Rollback MLflow en < 5 minutes
+- Latence API < 200ms ✓ (mesuré 2026-09-16 : p95 59 ms sur /predict, 1 000 comptes en 110 ms)
+- Rollback MLflow en < 5 minutes ✓ (mesuré : 6 s, registry + `/model/reload`)
 
 ## Périmètre exclu
 

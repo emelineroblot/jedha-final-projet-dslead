@@ -28,14 +28,22 @@ def load_model(model_uri: str):
 
 
 def promote_model(run_id: str, stage: str = PRODUCTION) -> str:
-    """Enregistre le modèle du run et le transitionne (archive l'ancien). Retourne la version."""
+    """
+    Promeut le modèle d'un run (archive l'ancienne version en Production). Retourne la version.
+    Si le run est déjà enregistré (train(auto_promote=False)), sa version existante est réutilisée —
+    pas de doublon dans le registry.
+    """
     client = MlflowClient()
-    mv = mlflow.register_model(f"runs:/{run_id}/model", MODEL_NAME)
+    existing = [mv for mv in client.search_model_versions(f"name='{MODEL_NAME}'") if mv.run_id == run_id]
+    if existing:
+        version = max(existing, key=lambda mv: int(mv.version)).version
+    else:
+        version = mlflow.register_model(f"runs:/{run_id}/model", MODEL_NAME).version
     client.transition_model_version_stage(
-        name=MODEL_NAME, version=mv.version, stage=stage, archive_existing_versions=True
+        name=MODEL_NAME, version=version, stage=stage, archive_existing_versions=True
     )
-    print(f"Modèle version {mv.version} promu en {stage}")
-    return str(mv.version)
+    print(f"Modèle version {version} promu en {stage}")
+    return str(version)
 
 
 def rollback_to_version(version: int) -> None:

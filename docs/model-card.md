@@ -56,7 +56,7 @@ Le modèle prédit presque tout en churn sur la nouvelle distribution : c'est la
 
 Gain de la boucle MLOps : **F1 0,66 → 0,98** sur le hold-out, sans intervention manuelle (dérive → retrain → évaluation → promotion → reload API).
 
-Résultats reproduits en local (MLflow sqlite temporaire) le 2026-09-15 ; les runs de la stack Docker sont dans l'expérience `churnguard` (baseline dans `baseline`).
+Résultats reproduits en local (MLflow sqlite, 2026-09-15) puis **sur la stack Docker par le DAG `auto_retraining` (2026-09-16)** : candidat F1 0,9777 vs Production 0,6566 → v5 promue automatiquement, API rechargée, smoke test OK.
 
 ## Hyperparamètres
 

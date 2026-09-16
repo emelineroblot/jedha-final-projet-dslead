@@ -51,12 +51,12 @@ Le dataset Kaggle fournit un fichier train et un fichier test **qui ne suivent p
 
 | Modèle XGBoost | Validation (même distribution) | **Hold-out** (distribution de production) |
 |---|---|---|
-| v1 — entraîné sur la référence seule | F1 0,999 | **F1 0,66** · AUC 0,73 (prédit presque tout en churn) |
-| v2 — réentraîné par le DAG (référence 100 k + fenêtre récente, seuil calibré sur la fenêtre) | F1 0,97 | **F1 0,98** · AUC 0,99 |
+| v1 — entraîné sur la référence seule | F1 0,999 | **F1 0,657** · AUC 0,735 (prédit presque tout en churn) |
+| v5 — réentraîné par le DAG `auto_retraining` (référence 100 k + fenêtre récente, seuil calibré sur la fenêtre) | F1 0,97 | **F1 0,978** · AUC 0,995 |
 
 C'est exactement ce que le pipeline automatise : détecter la dérive, réentraîner sur la fenêtre labellisée, promouvoir uniquement si le hold-out s'améliore. Comparaison des 3 algorithmes, tuning et justification du choix : [docs/model-card.md](docs/model-card.md).
 
-Latence API : `python scripts/bench_latency.py` (objectif p95 < 200 ms sur `/predict` ; le batch score 1 000 comptes en une passe).
+Latence API mesurée sur la stack Docker (`python scripts/bench_latency.py`) : **p95 = 59 ms** sur `/predict` (200 requêtes), **1 000 comptes en 110 ms** via `/predict/batch` (≈ 9 000 comptes/s). Rollback + rechargement de l'API : 6 s.
 
 ---
 

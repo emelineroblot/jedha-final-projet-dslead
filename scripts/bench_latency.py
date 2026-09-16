@@ -7,10 +7,14 @@ Les résultats alimentent la slide "métriques" (objectif : p95 < 200 ms sur /pr
 """
 import argparse
 import statistics
+import sys
 import time
+from pathlib import Path
 
 import httpx
 import pandas as pd
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))  # exécutable depuis n'importe où
 
 from src.paths import FEATURES_TEST_PATH, TARGET
 from src.preprocessing.features import FEATURE_COLUMNS
@@ -49,7 +53,7 @@ def bench(url: str, n: int, batch: int) -> None:
     s = _pct(single)
     print(f"POST /predict        ({n} requêtes)     : p50={s['p50']:.1f} ms  p95={s['p95']:.1f} ms  p99={s['p99']:.1f} ms  max={s['max']:.1f} ms")
     print(f"POST /predict/batch  ({batch} comptes ×5) : total moyen={statistics.mean(batch_times):.0f} ms  "
-          f"scoring serveur={statistics.mean(server_times):.0f} ms  → {batch / (statistics.mean(batch_times) / 1000):,.0f} comptes/s")
+          f"scoring serveur={statistics.mean(server_times):.0f} ms  = {batch / (statistics.mean(batch_times) / 1000):,.0f} comptes/s")
     print("OBJECTIF p95 < 200 ms :", "OK" if s["p95"] < 200 else "KO")
 
 

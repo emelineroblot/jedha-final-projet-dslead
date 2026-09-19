@@ -52,6 +52,7 @@ with DAG(
     schedule="0 3 * * 1",  # hebdomadaire le lundi à 3h00
     start_date=datetime(2025, 1, 1),
     catchup=False,
+    max_active_runs=1,  # un seul réentraînement à la fois (2 vCPU en prod ; runs planifié + manuel sérialisés)
     default_args={**default_args, "on_failure_callback": _on_failure},
     tags=["churnguard", "mlops"],
 ) as dag:

@@ -75,10 +75,13 @@ $COMPOSE run --rm --no-deps airflow-scheduler python -m src.training.registry se
 for i in $(seq 1 60); do curl -fs http://localhost:8000/health >/dev/null 2>&1 && break; sleep 5; done
 curl -fs -X POST http://localhost:8000/model/reload || true
 
-# Airflow prêt -> batch_scoring actif (un run immédiat alimente la table predictions) ; auto_retraining reste EN PAUSE
-# (dépauser un DAG hebdo lance le dernier intervalle manqué — déclenchement manuel pendant la démo)
+# Airflow prêt -> activation des DAGs. Dépauser un DAG planifié lance immédiatement son dernier intervalle manqué
+# (catchup=False n'empêche pas ce run unique) : batch_scoring score 500 comptes -> table predictions, puis
+# auto_retraining fait le premier réentraînement automatique (dérive détectée -> v2 promue, ~3 min).
+# Un DAG en pause n'exécute pas ses runs, même déclenchés à la main (P38).
 for i in $(seq 1 60); do curl -fs http://localhost:8080/health >/dev/null 2>&1 && break; sleep 5; done
 sleep 30   # laisser le scheduler parser les DAGs
 $COMPOSE exec -T airflow-scheduler airflow dags unpause batch_scoring || true
+$COMPOSE exec -T airflow-scheduler airflow dags unpause auto_retraining || true
 
 echo "bootstrap terminé : $(date -u)"

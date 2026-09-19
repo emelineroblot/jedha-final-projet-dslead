@@ -273,8 +273,8 @@ terraform destroy                     # ≈ 2,5 $/jour sinon
 ```
 
 Au premier boot, `user_data.sh` clone le dépôt, synchronise les données depuis S3, construit et lance la stack, entraîne le
-modèle baseline (v1 en Production, F1 hold-out ≈ 0,66) et active `batch_scoring`. La démo (dérive → `auto_retraining` →
-v2 promue à chaud) se joue ensuite exactement comme en local. Détails, coût, sécurité et script vidéo : [docs/deployment-aws.md](docs/deployment-aws.md).
+modèle baseline (v1 en Production, F1 hold-out 0,690) et active les DAGs. Boucle complète mesurée sur l'EC2 : **47 s**
+(dérive → réentraînement → évaluation → v2 promue et rechargée à chaud, F1 0,690 → 0,978). Détails, coût, sécurité et script vidéo : [docs/deployment-aws.md](docs/deployment-aws.md).
 
 ---
 

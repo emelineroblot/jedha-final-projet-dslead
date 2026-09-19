@@ -55,8 +55,10 @@ flowchart TB
 | PostgreSQL | conteneur, 3 bases | **même conteneur**, volume Docker sur l'EBS chiffré, mot de passe généré par Terraform. **RDS était la cible** : bloqué par le quota du plan gratuit du compte (1 instance, déjà utilisée par un autre projet) |
 | Artefacts MLflow | dossier `mlruns/` monté | **S3** `mlflow-artifacts/` (`--artifacts-destination`, rôle d'instance, aucune clé) |
 | Données | `data/processed/` local (DVC) | **S3** `data/processed/`, poussées par Terraform (`aws_s3_object`), synchronisées sur l'instance au boot |
-| Modèle initial | `python -m src.training.train` sur le poste | conteneur Airflow, une fois au boot : 3 modèles comparés sur la référence, le meilleur promu **v1** Production (F1 hold-out ≈ 0,66 — la dérive train/production est réelle), puis `POST /model/reload` |
-| DAGs | déclenchement manuel | `batch_scoring` actif (un run au boot alimente `predictions`) ; `auto_retraining` **en pause** — déclenché à la main pour la démo (P38) |
+| Modèle initial | `python -m src.training.train` sur le poste | conteneur Airflow, une fois au boot : 3 modèles comparés sur la référence, le meilleur enregistré **v1** puis mis en Production explicitement (`registry set-production`) — F1 hold-out **0,690** (LogReg ; XGBoost 0,657) : sous le gate automatique de 0,70, la dérive train/production est réelle — puis `POST /model/reload` |
+| DAGs | déclenchement manuel | les deux DAGs activés au boot : `batch_scoring` (un run immédiat alimente `predictions`), `auto_retraining` (premier réentraînement automatique → **v2**). Un DAG en pause n'exécute pas ses runs, même déclenchés à la main |
+| Rapports Evidently | `reports/` local | `reports/` du clone en bind mount (`chown 50000`) : `drift_report.{json,html}` + `history/` |
+| API | `--reload`, 1 process | `restart: always`, **1 worker** uvicorn (état du modèle en mémoire : `/model/reload` ne toucherait qu'un worker sur N) — montée en charge par réplication du conteneur |
 | Secrets | `.env` écrit à la main | **générés par Terraform** (`random_password`), écrits dans `/opt/churnguard/docker/prod/.env` (`chmod 600`) |
 | Accès | `localhost` | security group restreint à **l'IP publique de l'opérateur** (22, 8000, 5000, 8080) |
 | Mise à jour du code | rebuild manuel | **job CI `deploy`** : SSM → `scripts/deploy.sh` (git reset sur `main`, build, `up -d`, reload API) |
@@ -68,9 +70,9 @@ flowchart TB
 3. Écrit `docker/prod/.env` avec les secrets Terraform (Postgres, admin Airflow, secret key, webhook Discord, bucket S3).
 4. `aws s3 sync` des données processées (référence 440 k lignes, fenêtre incoming, hold-out).
 5. `docker compose build && up -d` (prod) — le conteneur Postgres crée les 3 bases au premier démarrage.
-6. Quand MLflow répond : `compose run airflow-scheduler python -m src.training.train` → LogReg / RF / XGBoost comparés, le meilleur enregistré **v1** et promu `Production` (≈ 10 min sur 2 vCPU).
+6. Quand MLflow répond : `compose run --no-deps airflow-scheduler python -m src.training.train` → LogReg / RF / XGBoost comparés sur la référence (≈ 4 min sur 2 vCPU), le meilleur enregistré **v1**, puis `registry set-production --version 1` (mise en service initiale, hors gate F1 ≥ 0,70).
 7. `POST /model/reload` : l'API (démarrée sans modèle, `/predict` en 503) charge v1.
-8. Quand Airflow répond : dépause de `batch_scoring` (un run immédiat : 500 comptes scorés → table `predictions`).
+8. Quand Airflow répond : activation de `batch_scoring` (run immédiat : 500 comptes scorés → table `predictions`) et d'`auto_retraining` (run immédiat du dernier intervalle hebdo = premier réentraînement automatique → v2 promue).
 
 Journal : `/var/log/churnguard-bootstrap.log` (commande dans `terraform output bootstrap_log`).
 
@@ -82,7 +84,7 @@ Prérequis : compte AWS avec droits EC2, S3, IAM ; CLI AWS configurée ; Terrafo
 cp infra/terraform/terraform.tfvars.example infra/terraform/terraform.tfvars   # alert_webhook_url (optionnel)
 cd infra/terraform
 terraform init
-terraform apply                         # ≈ 1 min, puis ≈ 15–20 min de bootstrap sur l'EC2
+terraform apply                         # ≈ 1 min, puis ≈ 12 min de bootstrap sur l'EC2 (build 5 min, entraînement 4 min)
 terraform output                        # api_url, airflow_url, mlflow_url, ssh, bootstrap_log, s3_bucket
 terraform output -raw airflow_login
 terraform output -json github_secrets   # AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY, AWS_REGION, EC2_INSTANCE_ID → secrets GitHub
@@ -123,15 +125,28 @@ l'IP publique change au redémarrage (`terraform refresh` puis `output`). Si l'I
 - **MLflow 3 + Host** : `--allowed-hosts *` sinon `403 Invalid Host header` depuis `http://mlflow:5000` (P37).
 - **Airflow UID 50000** : `src/` et `data/` montés depuis le clone doivent être `chown 50000:0` (bootstrap et `deploy.sh`).
 - **`compose run --no-deps`** pour l'entraînement baseline : le scheduler dépend de l'API « healthy », l'API démarre sans modèle → l'entraînement ne doit pas attendre la chaîne de dépendances.
-- **Dépauser un DAG hebdo** lance immédiatement le dernier intervalle manqué (P38) → `auto_retraining` reste en pause, `airflow dags trigger` pendant la démo.
+- **Gate de promotion** : le meilleur modèle baseline (F1 hold-out 0,690) est sous le seuil automatique de 0,70 → `train` l'enregistre sans le promouvoir ; la mise en service initiale est explicite (`registry set-production`).
+- **DAG en pause = runs jamais exécutés** (même `airflow dags trigger` reste `queued`). Dépauser un DAG hebdo lance immédiatement son dernier intervalle manqué (`catchup=False` n'empêche pas ce run unique) → les deux DAGs sont activés au bootstrap ; `max_active_runs=1` sérialise run planifié et run manuel.
+- **Volume nommé `reports`** : créé root car le dossier n'existe pas dans l'image Airflow → `PermissionError` dans `check_drift`. Bind mount du clone (`chown 50000`).
+- **`runs:/<id>/model` = 8 min** de chargement avec des artefacts S3 (résolution des logged models MLflow 3) contre < 1 s via `models:/churnguard-model/N` → le DAG évalue le candidat par sa version de registry.
+- **Workers uvicorn** : l'état du modèle est en mémoire du process → `--workers 1` par conteneur, sinon `/model/reload` ne recharge qu'un worker et l'API sert deux versions.
 - **`user_data` = premier boot uniquement** (`lifecycle.ignore_changes`) : les mises à jour passent par `deploy.sh` ; pour repartir de zéro, `terraform apply -replace=aws_instance.app`.
 
-## 7. Ce que la vidéo montre (script, ≈ 3 min)
+## 7. Validation (2026-09-19)
+
+Run manuel d'`auto_retraining` sur l'EC2 après `registry rollback --version 1` : `check_drift` 6 s (dérive détectée, source `predictions` en base) →
+`retrain_model` 32 s (3 modèles, 100 k lignes de référence + fenêtre récente) → `evaluate_model` 3 s (candidat 0,978 vs Production 0,690) →
+`promote_model` 3 s (v3 Production, `/model/reload`, smoke test, alerte Discord). **Boucle complète : 47 s.** Déploiement continu testé par SSM
+avec les clés du user `github-deploy` : `Success` (rebuild depuis le cache, redémarrage, reload).
+
+## 8. Ce que la vidéo montre (script, ≈ 3 min)
+
+Préparation (hors vidéo) : `registry rollback --version 1` + `POST /model/reload` pour repartir de la baseline.
 
 1. Console AWS ou `terraform output` : l'instance `churnguard-app`, le bucket S3 (`data/processed/`, `mlflow-artifacts/`).
-2. API (`http://<ip>:8000/docs`) : `GET /model/info` → **v1**, F1 hold-out ≈ 0,66 ; `POST /predict` sur un compte à risque.
-3. MLflow (`http://<ip>:5000`) : l'expérience `churnguard` (3 runs baseline), le registry `churnguard-model` v1 Production, les artefacts dans S3.
-4. Airflow (`http://<ip>:8080`) : `batch_scoring` vert (500 comptes), puis **trigger `auto_retraining`** → `check_drift` (9/15 features en dérive) → `retrain_model` → `evaluate_model` → `promote_model` (≈ 2 min).
-5. Discord : alerte de dérive puis notification de promotion **v2** (F1 hold-out ≈ 0,98).
-6. Retour API : `GET /model/info` → **v2** sans redémarrage ; MLflow : v1 archivée.
+2. API (`http://<ip>:8000/docs`) : `GET /model/info` → **v1**, F1 hold-out 0,690 ; `POST /predict` sur un compte à risque.
+3. MLflow (`http://<ip>:5000`) : l'expérience `churnguard` (runs baseline + réentraînements), le registry `churnguard-model`, les artefacts dans S3.
+4. Airflow (`http://<ip>:8080`) : `batch_scoring` vert (500 comptes), puis **▶ trigger `auto_retraining`** → `check_drift` (9/15 features en dérive) → `retrain_model` → `evaluate_model` → `promote_model` (< 1 min).
+5. Discord : « Réentraînement déclenché » puis « Nouveau modèle en Production — v1 → vN (F1 0,690 → 0,978) ».
+6. Retour API : `GET /model/info` → **vN** sans redémarrage ; MLflow : v1 archivée ; rollback en une commande si besoin.
 7. GitHub Actions : le run du dernier push sur `main` avec le job `deploy` vert (SSM).

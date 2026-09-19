@@ -51,7 +51,7 @@ flowchart TB
 
 | Brique | Développement (`docker/dev/`) | Production (`docker/prod/` + Terraform) |
 |---|---|---|
-| Images | `build:` local, hot-reload (`--reload`, `src/` monté dans l'API) | **construites sur l'instance** depuis le clone (`compose build`), même tag que les images GHCR de la CI ; API 2 workers uvicorn, `restart: always` |
+| Images | `build:` local, hot-reload (`--reload`, `src/` monté dans l'API) | **construites sur l'instance** depuis le clone (`compose build`), même tag que les images GHCR de la CI ; `restart: always` |
 | PostgreSQL | conteneur, 3 bases | **même conteneur**, volume Docker sur l'EBS chiffré, mot de passe généré par Terraform. **RDS était la cible** : bloqué par le quota du plan gratuit du compte (1 instance, déjà utilisée par un autre projet) |
 | Artefacts MLflow | dossier `mlruns/` monté | **S3** `mlflow-artifacts/` (`--artifacts-destination`, rôle d'instance, aucune clé) |
 | Données | `data/processed/` local (DVC) | **S3** `data/processed/`, poussées par Terraform (`aws_s3_object`), synchronisées sur l'instance au boot |

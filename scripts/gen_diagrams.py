@@ -15,7 +15,8 @@ TOOL_COLORS = {
     "Airflow": "#017CEE", "Evidently": "#E4572E", "PostgreSQL": "#336791", "DVC": "#945DD6", "DagsHub": "#4A2C8F",
     "GitHub Actions": "#24292E", "GHCR": "#24292E", "Streamlit": "#FF4B4B", "Mautic": "#4E5E9E", "Kaggle CSV": "#20BEFF",
     "Prometheus": "#E6522C", "HF Spaces": "#FFB000", "Pydantic": "#E92063", "Discord/Slack": "#5865F2", "pytest": "#0A9EDC",
-    "ruff": "#D7FF64", "Python": "#3776AB", "SeoLap": "#111827", "Hetzner": "#D50C2D", "joblib": "#555",
+    "ruff": "#D7FF64", "Python": "#3776AB", "SeoLap": "#111827", "joblib": "#555",
+    "AWS": "#FF9900", "Terraform": "#7B42BC", "EC2": "#FF9900", "S3": "#3F8624", "SSM": "#DD344C",
 }
 
 
@@ -100,7 +101,7 @@ def diagram_architecture():
     b += text(60, 116, "CI / CD — GitHub Actions", size=15, weight="bold")
     p, _ = pills_row(60, 128, ["GitHub Actions", "pytest", "ruff", "Docker", "GHCR", "DVC"], 600)
     b += p
-    steps = ["git push main", "test : ruff + 35 tests", "validate-model : F1 ≥ 0.75", "build : 3 images → GHCR", "deploy : HF Spaces / Hetzner"]
+    steps = ["git push main", "test : ruff + 35 tests", "validate-model : F1 ≥ 0.75", "build : 3 images → GHCR", "deploy : EC2 AWS via SSM"]
     x = 560
     for i, s_ in enumerate(steps):
         wbox = int(7.5 * len(s_)) + 16
@@ -205,18 +206,18 @@ def diagram_cicd():
         ("test", ["ruff", "pytest"], "blue"),
         ("validate-model", ["DVC", "joblib"], "green"),
         ("build ×3", ["Docker", "GHCR"], "violet"),
-        ("deploy", ["Hetzner"], "yellow"),
+        ("deploy", ["AWS", "SSM"], "yellow"),
     ]
     subs = [
         ["push sur main", "ou pull request"],
         ["lint src/ + tests/", "35 tests : API, preprocessing,", "monitoring, training"],
         ["dvc pull model_artifacts", "F1 ≥ 0.75 sur 500 lignes", "hold-out labellisées"],
         ["churnguard-api", "churnguard-mlflow", "churnguard-airflow", "tag main-<sha>"],
-        ["docker compose pull && up -d", "(désactivé — démo sur", "HF Spaces)"],
+        ["ssm send-command →", "scripts/deploy.sh : git reset,", "compose build, up -d, reload"],
     ]
     x, y, w, h = 60, 130, 230, 150
     for i, ((title, tools, color), sub) in enumerate(zip(stages, subs)):
-        b += block(x, y, w, h, title, tools, sub, color, optional=(title == "deploy"))
+        b += block(x, y, w, h, title, tools, sub, color)
         if i < len(stages) - 1:
             b += arrow(x + w, y + h / 2, x + w + 50, y + h / 2, "✓", label_dy=-8)
             b += text(x + w + 25, y + h / 2 + 40, "✗ STOP", size=11, weight="bold", fill="#D64545", anchor="middle")
@@ -235,8 +236,8 @@ def diagram_cicd():
         if i < len(stages2) - 1:
             b += arrow(x + w, y + h / 2, x + w + 50, y + h / 2)
         x += w + 50
-    b += multiline(1200, 400, ["Secrets GitHub :", "DAGSHUB_USER / DAGSHUB_TOKEN", "HF_TOKEN · HETZNER_SSH_KEY", "", "Sans secrets : la validation", "est ignorée avec un warning,", "jamais un faux vert."], size=11.5)
-    return svg(W, H, b, "Chaîne CI/CD — deux déclencheurs, deux pipelines", "GitHub Actions · GHCR · DVC · HuggingFace Spaces")
+    b += multiline(1200, 400, ["Secrets GitHub :", "DAGSHUB_USER / DAGSHUB_TOKEN", "HF_TOKEN · AWS_* (SSM, EC2_INSTANCE_ID)", "", "Sans secrets : validation et", "déploiement ignorés avec un", "warning, jamais un faux vert."], size=11.5)
+    return svg(W, H, b, "Chaîne CI/CD — deux déclencheurs, deux pipelines", "GitHub Actions · GHCR · DVC · AWS SSM · HuggingFace Spaces")
 
 
 # ---------------------------------------------------------------- 4. Versioning & lineage
@@ -291,7 +292,62 @@ def diagram_business():
     return svg(W, H, b, "Pourquoi ChurnGuard ?", "Prédire le churn pour agir avant le départ")
 
 
+# ---------------------------------------------------------------- 5. Production AWS
+def diagram_aws():
+    W, H = 1500, 730
+    b = ""
+    # opérateur + GitHub + alertes, en haut
+    b += block(40, 90, 330, 118, "Poste opérateur", ["Terraform", "AWS"],
+               ["terraform apply → 23 ressources", "Seule IP autorisée (SG) : SSH, API, UIs"], "grey")
+    b += block(430, 90, 400, 118, "GitHub Actions — CI/CD", ["GitHub Actions", "pytest", "Docker", "SSM"],
+               ["test → validate-model → build → deploy", "deploy : SSM Run Command → scripts/deploy.sh"], "grey")
+    b += block(890, 90, 330, 118, "Alertes", ["Discord/Slack"],
+               ["dérive détectée · modèle promu", "échec du DAG"], "orange")
+
+    # cadre AWS
+    b += f"<rect x='40' y='250' rx='16' ry='16' width='{W - 80}' height='440' fill='#FFF7EC' stroke='#FF9900' stroke-width='2'/>"
+    b += text(60, 278, "AWS eu-north-1 (Stockholm) — VPC par défaut", size=15, weight="bold", fill="#B86E00")
+    # cadre EC2
+    b += "<rect x='60' y='296' rx='14' ry='14' width='1040' height='376' fill='#FFFFFF' stroke='#FF9900' stroke-width='1.5' stroke-dasharray='6 4'/>"
+    b += text(80, 318, "EC2 m7i-flex.large · Ubuntu 24.04 · EBS 30 Go chiffré · rôle d'instance (S3 + SSM) · docker compose prod", size=13, weight="bold")
+    y, h, w, gap = 366, 150, 235, 22
+    xs = [80 + i * (w + gap) for i in range(4)]
+    b += block(xs[0], y, w, h, "API", ["FastAPI", "Docker"], ["/predict · /predict/batch", "/model/info · /model/reload", "charge churnguard-model @ Production"], "blue")
+    b += block(xs[1], y, w, h, "Base de données", ["PostgreSQL"], ["churnguard : predictions", "mlflow : backend store", "airflow : metadata"], "cyan")
+    b += block(xs[2], y, w, h, "Orchestration", ["Airflow"], ["batch_scoring (quotidien)", "auto_retraining (dérive OU", "5 000 nouvelles lignes)"], "yellow")
+    b += block(xs[3], y, w, h, "Tracking & Registry", ["MLflow"], ["experiment churnguard", "churnguard-model v1 → v2", "artefacts → S3"], "green")
+    b += block(80, 532, 480, 126, "Monitoring", ["Evidently", "Prometheus"],
+               ["check_drift : référence vs predictions (PostgreSQL)", "/metrics : latence, prédictions par risque, version"], "orange")
+    b += block(600, 532, 480, 126, "Bootstrap (user_data.sh, 1er boot)", ["Docker", "Python"],
+               ["Docker → clone GitHub → .env (secrets Terraform) → s3 sync", "→ compose build/up → train baseline v1 → reload API"], "violet")
+    # S3 + secrets à droite
+    b += block(1130, 320, 300, 150, "S3 — chiffré, versionné", ["S3"],
+               ["data/processed/*.csv", "(référence, incoming, hold-out)", "mlflow-artifacts/ (modèles, figures)"], "green")
+    b += block(1130, 500, 300, 158, "Secrets & accès", ["Terraform"],
+               ["mots de passe générés (random)", "clé SSH générée · aucune clé AWS", "sur l'instance (IMDSv2)", "user IAM github-deploy : SSM seul"], "grey")
+
+    # flèches
+    b += arrow(205, 208, 205, 250, "apply", label_dy=-4)
+    b += arrow(630, 208, 630, 296, "SSM : git pull + build + up", label_dy=-4)
+    b += arrow(xs[0] + w, y + 60, xs[1], y + 60)
+    b += text(xs[0] + w + gap / 2, y - 8, "predictions", size=11, fill="#374151", anchor="middle", extra="font-style='italic'")
+    b += arrow(xs[1] + w, y + 110, xs[2], y + 110)
+    b += text(xs[1] + w + gap / 2, y + h + 16, "features récentes (dérive)", size=11, fill="#374151", anchor="middle", extra="font-style='italic'")
+    b += arrow(xs[2] + w, y + 60, xs[3], y + 60)
+    b += text(xs[2] + w + gap / 2, y - 8, "train / promote", size=11, fill="#374151", anchor="middle", extra="font-style='italic'")
+    b += arrow(xs[3] + w, y + 75, 1130, y + 29)
+    b += text(1112, y + 36, "artefacts", size=11, fill="#374151", anchor="middle", extra="font-style='italic'")
+    b += arrow(xs[2] + w / 2, y, xs[0] + w / 2, y, "", curve=((xs[0] + xs[2] + w) / 2, y - 40))
+    b += text((xs[0] + xs[2] + w) / 2, y - 22, "/predict/batch · /model/reload", size=11, fill="#374151", anchor="middle", extra="font-style='italic'")
+    b += arrow(1280, 470, 1080, 560, "", color="#6B4EE6", dashed=True)
+    b += text(1250, 492, "s3 sync (boot)", size=11, fill="#6B4EE6", anchor="middle", extra="font-style='italic'")
+    b += arrow(xs[2] + w - 40, y, 1010, 208, "", color="#E8641B", dashed=True, curve=(1010, 330))
+    b += text(1062, 284, "webhook", size=11, fill="#E8641B", anchor="middle", extra="font-style='italic'")
+    b += text(W - 60, 712, "≈ 2,5 $/jour · terraform destroy après la soutenance · docs/deployment-aws.md", size=11.5, fill="#6B7280", anchor="end")
+    return svg(W, H, b, "Production AWS — le pipeline complet dans le cloud", "Infrastructure as Code (Terraform), déploiement continu (GitHub Actions → SSM), données et artefacts dans S3")
+
 for name, fn in {"01-architecture-globale": diagram_architecture, "02-boucle-reentrainement": diagram_retraining,
-                 "03-cicd": diagram_cicd, "04-versioning-lineage": diagram_versioning, "00-business-case": diagram_business}.items():
+                 "03-cicd": diagram_cicd, "04-versioning-lineage": diagram_versioning, "00-business-case": diagram_business,
+                 "05-production-aws": diagram_aws}.items():
     (OUT / f"{name}.svg").write_text(fn(), encoding="utf-8")
     print("écrit", OUT / f"{name}.svg")

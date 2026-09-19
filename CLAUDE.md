@@ -46,7 +46,8 @@ final-project-dslead/
 | 8 | Orchestration Airflow | S3 | ✓ |
 | 9 | Monitoring Evidently | S3–S4 | ✓ |
 | 10 | Documentation & diagramme | S4 | ✓ |
-| 11 | Présentation jury | S5 | ⏳ (semaine du 21/09/2026) |
+| 11 | Production AWS (Terraform) — vidéo du pipeline en prod | S5 | ✓ (2026-09-19) |
+| 12 | Présentation jury | S5 | ⏳ (semaine du 21/09/2026) |
 
 **Workflow git** : `main` + `feature/*` uniquement (branche `develop` supprimée le 2026-09-15 — phases 0–10 mergées dans `main`). Une feature = une branche `feature/nom-court`, mergée dans `main` une fois validée.
 
@@ -79,7 +80,25 @@ Audit complet vs énoncé Jedha dans `docs/audit.md` (non versionné). Correctio
 
 **Démo (validée)** : `airflow dags trigger auto_retraining` (DAG laissé **en pause** — le dépauser lance aussi le dernier intervalle hebdo manqué → double run, P38). `promote_model` réutilise la version déjà enregistrée par `train(auto_promote=False)` (plus de doublon v2→v4).
 
-**Reste à faire (côté Emeline)** : (1) rejouer la démo devant le jury depuis un registry propre (`down -v` → `up -d` → train baseline → `registry rollback --version 1` → trigger) ; (2) pousser les Spaces HF (`hf-space/`, `hf-airflow/`, `hf-mlflow/` mis à jour localement) ; (3) secrets GitHub `DAGSHUB_USER/TOKEN`, `HF_TOKEN` ; (4) `python scripts/bench_latency.py` pour le chiffre p95 ; (5) intégrer les schémas dans les slides.
+**Reste à faire (côté Emeline)** : (1) vidéo de la démo sur la stack AWS (script dans `docs/deployment-aws.md` §7) ; (2) pousser les Spaces HF (`hf-space/`, `hf-airflow/`, `hf-mlflow/` mis à jour localement) ; (3) secrets GitHub `DAGSHUB_USER/TOKEN`, `HF_TOKEN` + les 4 secrets AWS du job `deploy` ; (4) intégrer les schémas dans les slides ; (5) `terraform destroy` après la soutenance.
+
+## Phase 11 — Production AWS (2026-09-19) ✓
+
+Livrable Jedha « vidéo de la solution fonctionnant en production » → le pipeline complet tourne sur AWS. Même pattern que
+`automatic-fraud-detection` (validé le même jour). Doc publique : `docs/deployment-aws.md` ; schéma `docs/architecture/05-production-aws.svg`.
+
+- **`infra/terraform/`** (23 ressources, eu-north-1) : EC2 `churnguard-app` m7i-flex.large Ubuntu 24.04 (EBS 30 Go chiffré), S3 `churnguard-<acct>-<rand>` (`data/processed/*.csv` poussés par Terraform + `mlflow-artifacts/`), rôle d'instance S3 + `AmazonSSMManagedInstanceCore`, user IAM `churnguard-github-deploy` (`ssm:SendCommand` sur cette seule instance), SG = IP opérateur (22/8000/5000/8080), secrets `random_password`, clé SSH → `infra/terraform/keys/` (gitignoré avec tfstate/tfvars).
+- **Terraform natif** (1.9.8 installé, Avast désactivé) : `cd infra/terraform && terraform apply` ≈ 1 min, bootstrap EC2 ≈ 15–20 min. `terraform.tfvars` = webhook Discord (réutilisé de fraud-detection).
+- **Bootstrap `user_data.sh`** : Docker → clone (`repo_ref`) → `docker/prod/.env` généré → `aws s3 sync` → `compose build && up -d` → `compose run --no-deps airflow-scheduler python -m src.training.train` (baseline v1 Production) → `POST /model/reload` → `dags unpause batch_scoring` (`auto_retraining` reste en pause, P38). Log `/var/log/churnguard-bootstrap.log`. Code dans `/opt/churnguard`.
+- **`docker/prod/docker-compose.yml`** : `build:` sur les 3 services (images construites sur l'instance, taguées comme GHCR → `compose pull` reste possible), artefacts MLflow `MLFLOW_ARTIFACTS_DESTINATION` (S3 en prod, `/mlruns` sinon), `MLFLOW_S3_ENDPOINT_URL` + `AWS_DEFAULT_REGION` propagés à mlflow/api/airflow. `Dockerfile.mlflow` + `boto3`.
+- **CD** : job `deploy` du CI (`needs: [test, validate-model]`, push `main`) → `aws ssm send-command` → `scripts/deploy.sh main` sur l'instance (git reset, build, `up -d`, reload API). Secrets GitHub : `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, `AWS_REGION`, `EC2_INSTANCE_ID` (`terraform output -json github_secrets`). Sans secrets → warning, job ignoré. Le job `build` GHCR (rouge sur `churnguard-airflow`, cause à lire dans les logs Actions) n'est plus sur le chemin du déploiement.
+- **Coût ≈ 2,5 $/jour** (3ᵉ EC2 du compte avec `stripe-pipeline-*` et `fraud-detection-*`, à ne jamais toucher) → **`terraform destroy` après la soutenance**. Pause : `aws ec2 stop-instances` (IP publique change → `terraform refresh`).
+
+**Pitfalls** :
+- **P39** : sous cloud-init `$HOME` n'est pas défini → `git config --global` échoue et `set -e` tue le bootstrap. `export HOME=/root` en tête de `user_data.sh`.
+- **P40** : `user_data` est en `lifecycle.ignore_changes` (bootstrap = premier boot uniquement, les mises à jour passent par `deploy.sh`). Pour re-provisionner : `terraform apply -replace=aws_instance.app` (nouvelle IP publique).
+- **P41** : l'API démarre sans modèle (`/health` 200, `/predict` 503) et le scheduler dépend de l'API « healthy » → l'entraînement baseline se fait avec `compose run --rm --no-deps airflow-scheduler …`, puis `POST /model/reload`.
+- **P42** : `src/` et `data/` montés dans Airflow (UID 50000) → `chown -R 50000:0` au bootstrap et dans `deploy.sh`, sinon `simulate_drift` / `__pycache__` en échec d'écriture.
 
 ---
 
@@ -246,7 +265,7 @@ python scripts/bench_latency.py --url http://localhost:8001
 | Monitoring dérive | Evidently |
 | CI/CD | GitHub Actions |
 | Containerisation | Docker Compose (dev/prod séparés) |
-| Hébergement | Hetzner VPS |
+| Infra prod | AWS (EC2 + S3 + SSM) via Terraform |
 
 ## Données rivalytics (archivé — abandonné Phase 3)
 

@@ -5,6 +5,7 @@
 # Fichier rendu par templatefile() : les variables Terraform sont interpolées, le reste est du bash.
 set -euxo pipefail
 exec > >(tee -a /var/log/churnguard-bootstrap.log) 2>&1
+export HOME=/root   # cloud-init ne le définit pas (git config --global échouerait)
 
 export DEBIAN_FRONTEND=noninteractive
 apt-get update -y

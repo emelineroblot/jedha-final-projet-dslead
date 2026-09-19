@@ -64,6 +64,8 @@ services:
       --cors-allowed-origins *
       --host 0.0.0.0
       --port 5000
+    ports:
+      - "5000:5000"   # UI MLflow (security group : IP opérateur uniquement)
     volumes:
       - mlruns:/mlruns
     restart: always

@@ -63,9 +63,13 @@ COMPOSE="docker compose --env-file docker/prod/.env -f docker/prod/docker-compos
 $COMPOSE build
 $COMPOSE up -d
 
-# MLflow prêt -> entraînement baseline (référence seule) : 3 modèles comparés, le meilleur promu v1 Production
+# MLflow prêt -> entraînement baseline (référence seule) : 3 modèles comparés, le meilleur enregistré v1.
+# Le gate de promotion automatique (F1 hold-out >= 0.70) ne s'applique pas à la mise en service initiale :
+# la baseline (F1 ~ 0.69, dérive train/production) est mise en Production explicitement — c'est le point
+# de comparaison que le DAG auto_retraining devra battre.
 for i in $(seq 1 60); do curl -fs http://localhost:5000/health >/dev/null 2>&1 && break; sleep 5; done
 $COMPOSE run --rm --no-deps airflow-scheduler python -m src.training.train
+$COMPOSE run --rm --no-deps airflow-scheduler python -m src.training.registry set-production --version 1
 
 # L'API a démarré sans modèle -> rechargement de la version Production
 for i in $(seq 1 60); do curl -fs http://localhost:8000/health >/dev/null 2>&1 && break; sleep 5; done

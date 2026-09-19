@@ -67,6 +67,7 @@ jobs:
       contents: read
       packages: write
     strategy:
+      fail-fast: false   # chaque image remonte son propre verdict (pas d'annulation en cascade)
       matrix:
         include:
           - name: churnguard-api

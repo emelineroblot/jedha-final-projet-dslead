@@ -35,16 +35,19 @@ def promote_model(run_id: str, stage: str = PRODUCTION) -> str:
     pas de doublon dans le registry.
     """
     client = MlflowClient()
-    existing = [mv for mv in client.search_model_versions(f"name='{MODEL_NAME}'") if mv.run_id == run_id]
-    if existing:
-        version = max(existing, key=lambda mv: int(mv.version)).version
-    else:
-        version = mlflow.register_model(f"runs:/{run_id}/model", MODEL_NAME).version
+    version = version_for_run(run_id) or mlflow.register_model(f"runs:/{run_id}/model", MODEL_NAME).version
     client.transition_model_version_stage(
         name=MODEL_NAME, version=version, stage=stage, archive_existing_versions=True
     )
     print(f"Modèle version {version} promu en {stage}")
     return str(version)
+
+
+def version_for_run(run_id: str) -> Optional[str]:
+    """Version du registry associée à un run (None si le run n'est pas enregistré)."""
+    client = MlflowClient()
+    versions = [mv for mv in client.search_model_versions(f"name='{MODEL_NAME}'") if mv.run_id == run_id]
+    return max(versions, key=lambda mv: int(mv.version)).version if versions else None
 
 
 def rollback_to_version(version: int) -> None:

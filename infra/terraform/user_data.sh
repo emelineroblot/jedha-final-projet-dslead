@@ -38,7 +38,7 @@ POSTGRES_PASSWORD=${postgres_password}
 AIRFLOW_USER=${airflow_admin_user}
 AIRFLOW_PASSWORD=${airflow_admin_pass}
 AIRFLOW_SECRET_KEY=${airflow_secret_key}
-API_WORKERS=2
+API_WORKERS=1
 CHURNGUARD_HOME=$APP
 ALERT_WEBHOOK_URL=${alert_webhook_url}
 # Artefacts MLflow dans S3 (rôle d'instance, aucune clé). Endpoint régional obligatoire :

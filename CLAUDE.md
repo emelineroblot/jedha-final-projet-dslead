@@ -80,7 +80,7 @@ Audit complet vs énoncé Jedha dans `docs/audit.md` (non versionné). Correctio
 
 **Démo (validée)** : DAG `auto_retraining` **dépausé** (sinon le run reste `queued`, P38 corrigé) puis `airflow dags trigger auto_retraining` ; `max_active_runs=1`. `promote_model` réutilise la version déjà enregistrée par `train(auto_promote=False)` (plus de doublon v2→v4).
 
-**Reste à faire (côté Emeline)** : (1) vidéo de la démo sur la stack AWS (script dans `docs/deployment-aws.md` §7) ; (2) pousser les Spaces HF (`hf-space/`, `hf-airflow/`, `hf-mlflow/` mis à jour localement) ; (3) secrets GitHub `DAGSHUB_USER/TOKEN`, `HF_TOKEN` + les 4 secrets AWS du job `deploy` ; (4) intégrer les schémas dans les slides ; (5) `terraform destroy` après la soutenance.
+**Reste à faire (côté Emeline)** : (1) vidéo de la démo sur la stack AWS (script dans `docs/deployment-aws.md` §7) ; (2) pousser les Spaces HF (`hf-space/`, `hf-airflow/`, `hf-mlflow/` mis à jour localement) ; (3) secrets GitHub `DAGSHUB_USER/TOKEN`, `HF_TOKEN` (les 4 secrets AWS du job `deploy` sont posés depuis le 2026-09-19) ; (4) intégrer les schémas dans les slides ; (5) `terraform destroy` après la soutenance.
 
 ## Phase 11 — Production AWS (2026-09-19) ✓
 

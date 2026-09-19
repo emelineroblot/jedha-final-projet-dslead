@@ -46,7 +46,8 @@ final-project-dslead/
 | 8 | Orchestration Airflow | S3 | ✓ |
 | 9 | Monitoring Evidently | S3–S4 | ✓ |
 | 10 | Documentation & diagramme | S4 | ✓ |
-| 11 | Présentation jury | S5 | ⏳ (semaine du 21/09/2026) |
+| 11 | Production AWS (Terraform) — vidéo du pipeline en prod | S5 | ✓ (2026-09-19) |
+| 12 | Présentation jury | S5 | ⏳ (semaine du 21/09/2026) |
 
 **Workflow git** : `main` + `feature/*` uniquement (branche `develop` supprimée le 2026-09-15 — phases 0–10 mergées dans `main`). Une feature = une branche `feature/nom-court`, mergée dans `main` une fois validée.
 
@@ -74,12 +75,34 @@ Audit complet vs énoncé Jedha dans `docs/audit.md` (non versionné). Correctio
 - **P36** : avec Avast, Docker Hub lui-même est inaccessible par moments (`x509: certificate` / `DeadlineExceeded` sur `registry-1.docker.io`) et le débit conteneur tombe à ~370 kB/s. Validation Docker faite le 2026-09-16 avec Avast en pause (débit 8 Mo/s au lieu de 370 kB/s). Les Dockerfiles ont un cache pip partagé (`id=churnguard-pip`) + `wheels/` (bind mount, vide en CI) + `PIP_DEFAULT_TIMEOUT/RETRIES`.
 - **P34** : d'autres projets (`fraud-detection-*`, `food_impact_db`) occupent les ports 8080/5000/5432 → `docker stop` avant de lancer la stack ChurnGuard.
 - **P37** : **MLflow 3.x rejette tout Host ≠ localhost** (`403 Invalid Host header - possible DNS rebinding attack`) → depuis les conteneurs (`http://mlflow:5000`) l'API et Airflow ne peuvent pas joindre le registry. Obligatoire : `--allowed-hosts * --cors-allowed-origins *` dans la commande `mlflow server` (compose dev + prod).
-- **P38** : dépauser un DAG `schedule` hebdo lance immédiatement le dernier intervalle manqué (même avec `catchup=False`) → en démo, garder `auto_retraining` en pause et utiliser `airflow dags trigger`.
+- **P38** : dépauser un DAG `schedule` hebdo lance immédiatement le dernier intervalle manqué (même avec `catchup=False`) — mais un DAG en pause n'exécute **aucun** run, même déclenché à la main → voir P38 corrigé (Phase 11).
 - **P32** : `mlflow server` doit tourner avec `--serve-artifacts --artifacts-destination /mlruns` pour que les clients (host, API, Airflow) n'aient pas besoin du chemin `/mlruns` local.
 
-**Démo (validée)** : `airflow dags trigger auto_retraining` (DAG laissé **en pause** — le dépauser lance aussi le dernier intervalle hebdo manqué → double run, P38). `promote_model` réutilise la version déjà enregistrée par `train(auto_promote=False)` (plus de doublon v2→v4).
+**Démo (validée)** : DAG `auto_retraining` **dépausé** (sinon le run reste `queued`, P38 corrigé) puis `airflow dags trigger auto_retraining` ; `max_active_runs=1`. `promote_model` réutilise la version déjà enregistrée par `train(auto_promote=False)` (plus de doublon v2→v4).
 
-**Reste à faire (côté Emeline)** : (1) rejouer la démo devant le jury depuis un registry propre (`down -v` → `up -d` → train baseline → `registry rollback --version 1` → trigger) ; (2) pousser les Spaces HF (`hf-space/`, `hf-airflow/`, `hf-mlflow/` mis à jour localement) ; (3) secrets GitHub `DAGSHUB_USER/TOKEN`, `HF_TOKEN` ; (4) `python scripts/bench_latency.py` pour le chiffre p95 ; (5) intégrer les schémas dans les slides.
+**Reste à faire (côté Emeline)** : (1) vidéo de la démo sur la stack AWS (script dans `docs/deployment-aws.md` §7) ; (2) pousser les Spaces HF (`hf-space/`, `hf-airflow/`, `hf-mlflow/` mis à jour localement) ; (3) secrets GitHub `DAGSHUB_USER/TOKEN`, `HF_TOKEN` + les 4 secrets AWS du job `deploy` ; (4) intégrer les schémas dans les slides ; (5) `terraform destroy` après la soutenance.
+
+## Phase 11 — Production AWS (2026-09-19) ✓
+
+Livrable Jedha « vidéo de la solution fonctionnant en production » → le pipeline complet tourne sur AWS. Même pattern que
+`automatic-fraud-detection` (validé le même jour). Doc publique : `docs/deployment-aws.md` ; schéma `docs/architecture/05-production-aws.svg`.
+
+- **`infra/terraform/`** (23 ressources, eu-north-1) : EC2 `churnguard-app` m7i-flex.large Ubuntu 24.04 (EBS 30 Go chiffré), S3 `churnguard-<acct>-<rand>` (`data/processed/*.csv` poussés par Terraform + `mlflow-artifacts/`), rôle d'instance S3 + `AmazonSSMManagedInstanceCore`, user IAM `churnguard-github-deploy` (`ssm:SendCommand` sur cette seule instance), SG = IP opérateur (22/8000/5000/8080), secrets `random_password`, clé SSH → `infra/terraform/keys/` (gitignoré avec tfstate/tfvars).
+- **Terraform natif** (1.9.8 installé, Avast désactivé) : `cd infra/terraform && terraform apply` ≈ 1 min, bootstrap EC2 ≈ 15–20 min. `terraform.tfvars` = webhook Discord (réutilisé de fraud-detection).
+- **Bootstrap `user_data.sh`** (≈ 12 min) : Docker → clone (`repo_ref`) → `docker/prod/.env` généré → `aws s3 sync` → `compose build && up -d` → `compose run --no-deps airflow-scheduler python -m src.training.train` (v1 = LogReg, F1 hold-out 0,690 < gate 0,70 → enregistrée sans promotion) → `registry set-production --version 1` (mise en service initiale) → `POST /model/reload` → `dags unpause batch_scoring` + `auto_retraining` (run immédiat du dernier intervalle = premier réentraînement auto → v2). Log `/var/log/churnguard-bootstrap.log`. Code dans `/opt/churnguard`.
+- **`docker/prod/docker-compose.yml`** : `build:` sur les 3 services (images construites sur l'instance, taguées comme GHCR → `compose pull` reste possible), artefacts MLflow `MLFLOW_ARTIFACTS_DESTINATION` (S3 en prod, `/mlruns` sinon), `MLFLOW_S3_ENDPOINT_URL` + `AWS_DEFAULT_REGION` propagés à mlflow/api/airflow. `Dockerfile.mlflow` + `boto3`.
+- **Validation live (2026-09-19)** : `auto_retraining` manuel après `rollback --version 1` → **47 s** (check_drift 6 s, retrain 32 s, evaluate 3 s, promote+reload+smoke 3 s), v3 Production, alerte Discord ; chemin SSM testé avec les clés `github-deploy` (`Success`).
+- **CD** : job `deploy` du CI (`needs: [test, validate-model]`, push `main`) → `aws ssm send-command` → `scripts/deploy.sh main` sur l'instance (git reset, build, `up -d`, reload API). Secrets GitHub : `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, `AWS_REGION`, `EC2_INSTANCE_ID` (`terraform output -json github_secrets`). Sans secrets → warning, job ignoré. Le job `build` GHCR (rouge sur `churnguard-airflow`, cause à lire dans les logs Actions) n'est plus sur le chemin du déploiement.
+- **Coût ≈ 2,5 $/jour** (3ᵉ EC2 du compte avec `stripe-pipeline-*` et `fraud-detection-*`, à ne jamais toucher) → **`terraform destroy` après la soutenance**. Pause : `aws ec2 stop-instances` (IP publique change → `terraform refresh`).
+
+**Pitfalls** :
+- **P39** : sous cloud-init `$HOME` n'est pas défini → `git config --global` échoue et `set -e` tue le bootstrap. `export HOME=/root` en tête de `user_data.sh`.
+- **P40** : `user_data` est en `lifecycle.ignore_changes` (bootstrap = premier boot uniquement, les mises à jour passent par `deploy.sh`). Pour re-provisionner : `terraform apply -replace=aws_instance.app` (nouvelle IP publique).
+- **P41** : l'API démarre sans modèle (`/health` 200, `/predict` 503) et le scheduler dépend de l'API « healthy » → l'entraînement baseline se fait avec `compose run --rm --no-deps airflow-scheduler …`, puis `POST /model/reload`.
+- **P42** : `src/`, `data/` et `reports/` montés dans Airflow (UID 50000) → `chown -R 50000:0` au bootstrap et dans `deploy.sh`. **Pas de volume nommé pour `reports`** : créé root (dossier absent de l'image) → `PermissionError` dans `check_drift`.
+- **P43** : `--workers N` uvicorn + état modèle en mémoire → `/model/reload` ne recharge qu'un worker (l'API servait v1 et 503 en alternance). **1 worker par conteneur** en prod ; scaler par réplication.
+- **P44** : avec artefacts S3, `load_model("runs:/<id>/model")` prend **494 s** (résolution logged models MLflow 3) contre 0,9 s via `models:/churnguard-model/N` → `evaluate_model` charge le candidat par sa version (`registry.version_for_run`).
+- **P38 (corrigé)** : un DAG **en pause n'exécute jamais ses runs**, même `airflow dags trigger` (reste `queued`). Le dépauser lance une fois son dernier intervalle manqué (`catchup=False` n'empêche pas ce run unique). Prod : les deux DAGs activés au bootstrap, `max_active_runs=1` sérialise planifié + manuel.
 
 ---
 
@@ -246,7 +269,7 @@ python scripts/bench_latency.py --url http://localhost:8001
 | Monitoring dérive | Evidently |
 | CI/CD | GitHub Actions |
 | Containerisation | Docker Compose (dev/prod séparés) |
-| Hébergement | Hetzner VPS |
+| Infra prod | AWS (EC2 + S3 + SSM) via Terraform |
 
 ## Données rivalytics (archivé — abandonné Phase 3)
 

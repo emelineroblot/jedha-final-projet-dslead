@@ -52,6 +52,7 @@ with DAG(
     schedule="0 3 * * 1",  # hebdomadaire le lundi à 3h00
     start_date=datetime(2025, 1, 1),
     catchup=False,
+    max_active_runs=1,  # un seul réentraînement à la fois (2 vCPU en prod ; runs planifié + manuel sérialisés)
     default_args={**default_args, "on_failure_callback": _on_failure},
     tags=["churnguard", "mlops"],
 ) as dag:
@@ -107,7 +108,7 @@ with DAG(
         from src.paths import FEATURES_TEST_PATH, TARGET
         from src.preprocessing.features import FEATURE_COLUMNS
         from src.training.evaluate import evaluate
-        from src.training.registry import get_production_info, load_model
+        from src.training.registry import get_production_info, load_model, version_for_run
 
         ti = context["ti"]
         best_run_id = ti.xcom_pull(task_ids="retrain_model", key="best_run_id")
@@ -117,7 +118,11 @@ with DAG(
 
         client = MlflowClient()
         cand_threshold = float(client.get_run(best_run_id).data.params.get("decision_threshold", 0.5))
-        new_metrics = evaluate(load_model(f"runs:/{best_run_id}/model"), X_test, y_test, cand_threshold)
+        # Le candidat est déjà enregistré par train(auto_promote=False) : charger via models:/ (< 1 s) plutôt que
+        # runs:/ — avec des artefacts S3, la résolution runs:/ des logged models MLflow 3 prend ~8 min (P44).
+        cand_version = version_for_run(best_run_id)
+        cand_uri = f"models:/{MODEL_NAME}/{cand_version}" if cand_version else f"runs:/{best_run_id}/model"
+        new_metrics = evaluate(load_model(cand_uri), X_test, y_test, cand_threshold)
 
         prod = get_production_info()
         if prod:

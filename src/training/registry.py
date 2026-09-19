@@ -4,6 +4,7 @@ MLflow Model Registry : promotion, rollback, inspection.
 CLI :
     python -m src.training.registry list
     python -m src.training.registry promote --run-id <id>
+    python -m src.training.registry set-production --version N   (mise en service initiale)
     python -m src.training.registry rollback --version N
 """
 import os
@@ -34,16 +35,19 @@ def promote_model(run_id: str, stage: str = PRODUCTION) -> str:
     pas de doublon dans le registry.
     """
     client = MlflowClient()
-    existing = [mv for mv in client.search_model_versions(f"name='{MODEL_NAME}'") if mv.run_id == run_id]
-    if existing:
-        version = max(existing, key=lambda mv: int(mv.version)).version
-    else:
-        version = mlflow.register_model(f"runs:/{run_id}/model", MODEL_NAME).version
+    version = version_for_run(run_id) or mlflow.register_model(f"runs:/{run_id}/model", MODEL_NAME).version
     client.transition_model_version_stage(
         name=MODEL_NAME, version=version, stage=stage, archive_existing_versions=True
     )
     print(f"Modèle version {version} promu en {stage}")
     return str(version)
+
+
+def version_for_run(run_id: str) -> Optional[str]:
+    """Version du registry associée à un run (None si le run n'est pas enregistré)."""
+    client = MlflowClient()
+    versions = [mv for mv in client.search_model_versions(f"name='{MODEL_NAME}'") if mv.run_id == run_id]
+    return max(versions, key=lambda mv: int(mv.version)).version if versions else None
 
 
 def rollback_to_version(version: int) -> None:
@@ -106,6 +110,8 @@ def main() -> None:
     p_promote.add_argument("--run-id", required=True)
     p_rollback = sub.add_parser("rollback", help="Remet une version en Production")
     p_rollback.add_argument("--version", type=int, required=True)
+    p_set = sub.add_parser("set-production", help="Met une version en Production (mise en service initiale, hors gate F1)")
+    p_set.add_argument("--version", type=int, required=True)
     args = parser.parse_args()
 
     if args.command == "list":
@@ -114,7 +120,7 @@ def main() -> None:
             print(f"v{r['version']:<3} {r['stage']:<11} {r['model_type']:<20} F1={f1}  {r['created']}  run={r['run_id'][:8]}")
     elif args.command == "promote":
         promote_model(args.run_id)
-    elif args.command == "rollback":
+    elif args.command in ("rollback", "set-production"):
         rollback_to_version(args.version)
 
 

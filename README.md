@@ -8,7 +8,7 @@ Entraîné sur le dataset Kaggle **muhammadshahidazeem** (440 k lignes), conçu 
 
 ![Architecture](docs/architecture/01-architecture-globale.svg)
 
-> Schémas détaillés : [boucle de réentraînement](docs/architecture/02-boucle-reentrainement.svg) · [CI/CD](docs/architecture/03-cicd.svg) · [versioning & lineage](docs/architecture/04-versioning-lineage.svg) · [business case](docs/architecture/00-business-case.svg)
+> Schémas détaillés : [boucle de réentraînement](docs/architecture/02-boucle-reentrainement.svg) · [CI/CD](docs/architecture/03-cicd.svg) · [versioning & lineage](docs/architecture/04-versioning-lineage.svg) · [production AWS](docs/architecture/05-production-aws.svg) · [business case](docs/architecture/00-business-case.svg)
 
 ---
 
@@ -24,9 +24,10 @@ Entraîné sur le dataset Kaggle **muhammadshahidazeem** (440 k lignes), conçu 
 8. [Monitoring & alertes](#monitoring--alertes)
 9. [Orchestration Airflow](#orchestration-airflow)
 10. [CI/CD](#cicd)
-11. [Tests](#tests)
-12. [Structure du repo](#structure-du-repo)
-13. [Documentation](#documentation)
+11. [Production AWS](#production-aws)
+12. [Tests](#tests)
+13. [Structure du repo](#structure-du-repo)
+14. [Documentation](#documentation)
 
 ---
 
@@ -41,7 +42,8 @@ Entraîné sur le dataset Kaggle **muhammadshahidazeem** (440 k lignes), conçu 
 | Observabilité | Prometheus, PostgreSQL | Latence par requête (log JSON + `/metrics`), prédictions stockées en base |
 | Monitoring | Evidently | Dérive référence vs production (prédictions reçues ou fenêtre labellisée), rapport horodaté, alerte Discord/Slack |
 | Orchestration | Airflow | `batch_scoring` (quotidien) · `auto_retraining` (hebdo) : dérive **ou** nouvelles données → retrain → évaluation hold-out → promotion + reload API + smoke test → rollback si échec |
-| CI/CD | GitHub Actions, GHCR | lint + 35 tests → validation du modèle (F1 ≥ 0,75) → build de 3 images → déploiement (HF Spaces via `deploy-model.yml`, Hetzner prêt) |
+| CI/CD | GitHub Actions, GHCR, AWS SSM | lint + 35 tests → validation du modèle (F1 ≥ 0,75) → build de 3 images → déploiement continu sur l'EC2 AWS (+ HF Spaces via `deploy-model.yml`) |
+| Production | Terraform, AWS EC2 / S3 / IAM | infrastructure as code (23 ressources), stack prod `docker/prod/`, données et artefacts MLflow dans S3 — [docs/deployment-aws.md](docs/deployment-aws.md) |
 
 ---
 
@@ -64,10 +66,10 @@ Latence API mesurée sur la stack Docker (`python scripts/bench_latency.py`) : *
 
 | Service | HuggingFace Space |
 |---|---|
-| API (Swagger) | https://huggingface.co/spaces/emeliner/churnguard-api |
-| Dashboard Streamlit (CRM SeoLap simulé) | https://huggingface.co/spaces/emeliner/churnguard-demo |
-| MLflow (runs + registry, lecture seule) | https://huggingface.co/spaces/emeliner/churnguard-mlflow |
-| Airflow (DAGs, vitrine — ne pas déclencher) | https://huggingface.co/spaces/emeliner/churnguard-airflow |
+| API (Swagger) | https://huggingface.co/spaces/EmelineR/churnguard |
+| Dashboard Streamlit (CRM SeoLap simulé) | https://huggingface.co/spaces/EmelineR/churnguard-demo |
+| MLflow (runs + registry, lecture seule) | https://huggingface.co/spaces/EmelineR/churnguard-mlflow |
+| Airflow (DAGs, vitrine — ne pas déclencher) | https://huggingface.co/spaces/EmelineR/churnguard-airflow |
 
 Les Spaces MLflow et Airflow sont des vitrines sans exécution (pas de worker, base SQLite). Le cycle complet s'exécute sur la stack Docker locale ci-dessous.
 
@@ -247,11 +249,32 @@ Variables : `MLFLOW_TRACKING_URI`, `CHURNGUARD_API_URL`, `DATABASE_URL`, `ALERT_
 | `test` | `ruff check src/ tests/` + `pytest tests/` (API, preprocessing, monitoring, training) | lint ou test rouge |
 | `validate-model` | `dvc pull model_artifacts` puis F1 ≥ 0,75 sur `tests/fixtures/sample_test.csv` (500 lignes hold-out) | F1 insuffisant — ignoré avec warning si les secrets DagsHub sont absents |
 | `build` | 3 images (`churnguard-api`, `churnguard-mlflow`, `churnguard-airflow`) → GHCR, tags `main` + `main-<sha>` | — |
-| `deploy` | `docker compose pull && up -d` sur Hetzner via SSH | désactivé (`if: false`) — démo déployée sur HF Spaces |
+| `deploy` | SSM Run Command → `scripts/deploy.sh` sur l'EC2 AWS (git reset `main`, `compose build`, `up -d`, reload API) | ignoré avec warning si les secrets AWS sont absents (infra détruite hors soutenance) |
 
 `.github/workflows/deploy-model.yml` (manuel ou tag `model-v*`) : pull du modèle (DVC) → validation → bundle → push sur le Space HF `churnguard-api`. Ce workflow déploie une **mise à jour du modèle** indépendamment du code.
 
-Secrets GitHub : `DAGSHUB_USER`, `DAGSHUB_TOKEN`, `HF_TOKEN` (+ `HETZNER_HOST`, `HETZNER_SSH_KEY` pour activer `deploy`).
+Secrets GitHub : `DAGSHUB_USER`, `DAGSHUB_TOKEN`, `HF_TOKEN` ; pour `deploy` : `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, `AWS_REGION`, `EC2_INSTANCE_ID` (`terraform output -json github_secrets`).
+
+---
+
+## Production AWS
+
+![Production AWS](docs/architecture/05-production-aws.svg)
+
+Le pipeline complet tourne sur une EC2 (eu-north-1) provisionnée par Terraform — [`infra/terraform/`](infra/terraform/) :
+security group restreint à l'IP de l'opérateur, S3 chiffré/versionné (données processées + artefacts MLflow), rôle d'instance
+(aucune clé AWS sur la machine), secrets générés, déploiement continu via SSM depuis GitHub Actions.
+
+```bash
+cd infra/terraform
+terraform init && terraform apply     # ≈ 1 min + ≈ 15–20 min de bootstrap (build des images, entraînement baseline v1)
+terraform output                      # api_url · airflow_url · mlflow_url · ssh · bootstrap_log
+terraform destroy                     # ≈ 2,5 $/jour sinon
+```
+
+Au premier boot, `user_data.sh` clone le dépôt, synchronise les données depuis S3, construit et lance la stack, entraîne le
+modèle baseline (v1 en Production, F1 hold-out 0,690) et active les DAGs. Boucle complète mesurée sur l'EC2 : **47 s**
+(dérive → réentraînement → évaluation → v2 promue et rechargée à chaud, F1 0,690 → 0,978). Détails, coût, sécurité et script vidéo : [docs/deployment-aws.md](docs/deployment-aws.md).
 
 ---
 
@@ -285,12 +308,13 @@ ruff check src/ tests/
 │       ├── dags/                # batch_scoring_dag.py · retraining_dag.py
 │       └── scripts/             # simulate_drift.py
 ├── tests/                       # + fixtures/sample_test.csv (500 lignes hold-out)
-├── scripts/bench_latency.py
+├── scripts/                     # bench_latency.py · deploy.sh (mise à jour de l'instance prod) · gen_diagrams.py
 ├── docker/dev/ · docker/prod/   # compose séparés (+ .env.example prod)
 ├── Dockerfile · Dockerfile.mlflow · Dockerfile.airflow · Dockerfile.hf
-├── .github/workflows/           # ci.yml · deploy-model.yml
+├── .github/workflows/           # ci.yml (test → validate → build → deploy SSM) · deploy-model.yml
+├── infra/terraform/             # EC2 + S3 + IAM + SG (main.tf · user_data.sh · outputs.tf)
 ├── dvc.yaml · dvc.lock · model_artifacts.dvc · data/*.dvc
-├── docs/                        # architecture/ · api.md · dataset-report.md · model-card.md
+├── docs/                        # architecture/ · api.md · dataset-report.md · model-card.md · deployment-aws.md
 ├── notebooks/                   # 02_eda_new_dataset.ipynb (EDA dataset actif) · 01_eda.ipynb (rivalytics, archivé)
 ├── demo/                        # dashboard Streamlit (Space churnguard-demo)
 └── screens/                     # captures de la stack
@@ -303,6 +327,7 @@ ruff check src/ tests/
 - [docs/dataset-report.md](docs/dataset-report.md) — dataset, EDA, preprocessing justifié, dérive train/test
 - [docs/model-card.md](docs/model-card.md) — choix de l'algorithme, tuning, métriques, limites
 - [docs/api.md](docs/api.md) — guide d'intégration de l'API
+- [docs/deployment-aws.md](docs/deployment-aws.md) — production AWS : architecture, reproduction, coût, sécurité, script vidéo
 - [docs/architecture/](docs/architecture/) — schémas (SVG)
 - `notebooks/02_eda_new_dataset.ipynb` — EDA exécutée
 

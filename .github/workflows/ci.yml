@@ -102,21 +102,41 @@ jobs:
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
-  # 4. Déploiement VPS Hetzner — désactivé (démo déployée sur HuggingFace Spaces, voir deploy-model.yml).
-  #    Pour activer : secrets HETZNER_HOST + HETZNER_SSH_KEY, puis remplacer `if: false` par `if: github.ref == 'refs/heads/main'`.
+  # 4. Déploiement continu sur l'EC2 AWS (infra/terraform/) via SSM Run Command — aucun port SSH ouvert aux runners.
+  #    L'instance met à jour son clone, reconstruit les images et redémarre les services (scripts/deploy.sh).
+  #    Secrets : AWS_ACCESS_KEY_ID / AWS_SECRET_ACCESS_KEY (user IAM churnguard-github-deploy, droit ssm:SendCommand
+  #    sur cette seule instance), AWS_REGION, EC2_INSTANCE_ID — `terraform output -json github_secrets`.
+  #    Ignoré avec warning tant que les secrets sont absents (infra détruite après la soutenance).
   deploy:
-    needs: build
-    if: false
+    needs: [test, validate-model]
+    if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
     runs-on: ubuntu-latest
+    env:
+      EC2_INSTANCE_ID: ${{ secrets.EC2_INSTANCE_ID }}
     steps:
-      - name: Deploy to Hetzner
-        uses: appleboy/ssh-action@v1
+      - name: Skipped (no AWS secrets)
+        if: env.EC2_INSTANCE_ID == ''
+        run: echo "::warning::EC2_INSTANCE_ID absent — déploiement ignoré"
+      - name: Configure AWS credentials
+        if: env.EC2_INSTANCE_ID != ''
+        uses: aws-actions/configure-aws-credentials@v4
         with:
-          host: ${{ secrets.HETZNER_HOST }}
-          username: root
-          key: ${{ secrets.HETZNER_SSH_KEY }}
-          script: |
-            cd /opt/churnguard
-            git pull
-            docker compose -f docker/prod/docker-compose.yml pull
-            docker compose -f docker/prod/docker-compose.yml up -d
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ secrets.AWS_REGION }}
+      - name: Deploy via SSM (git pull + compose build + up + reload API)
+        if: env.EC2_INSTANCE_ID != ''
+        run: |
+          CMD_ID=$(aws ssm send-command --instance-ids "$EC2_INSTANCE_ID" --document-name AWS-RunShellScript             --comment "churnguard deploy ${GITHUB_SHA::7}" --timeout-seconds 1800             --parameters 'commands=["cd /opt/churnguard && bash scripts/deploy.sh main"],executionTimeout=["1800"]'             --query Command.CommandId --output text)
+          echo "SSM command: $CMD_ID"
+          for i in $(seq 1 180); do
+            STATUS=$(aws ssm get-command-invocation --command-id "$CMD_ID" --instance-id "$EC2_INSTANCE_ID"               --query Status --output text 2>/dev/null || echo Pending)
+            case "$STATUS" in
+              Success) break ;;
+              Failed|Cancelled|TimedOut)
+                aws ssm get-command-invocation --command-id "$CMD_ID" --instance-id "$EC2_INSTANCE_ID"                   --query '[StandardOutputContent,StandardErrorContent]' --output text | tail -n 80
+                echo "::error::Déploiement $STATUS"; exit 1 ;;
+            esac
+            sleep 10
+          done
+          aws ssm get-command-invocation --command-id "$CMD_ID" --instance-id "$EC2_INSTANCE_ID"             --query StandardOutputContent --output text | tail -n 40

@@ -1,9 +1,13 @@
 name: churnguard-prod
 
-# Stack de production (VPS Hetzner). Variables lues depuis docker/prod/.env — voir .env.example.
-# Différences avec dev : images pré-construites (GHCR), pas de hot-reload, restart: always,
-# API sur le port 8000, secrets externalisés.
+# Stack de production (EC2 AWS provisionnée par infra/terraform/). Variables lues depuis docker/prod/.env — voir .env.example.
+# Différences avec dev : images construites sur l'instance depuis le clone (`compose build`, taguées comme les images
+# GHCR de la CI — `compose pull` fonctionne aussi), pas de hot-reload, restart: always, API sur le port 8000,
+# secrets générés par Terraform, artefacts MLflow dans S3 (MLFLOW_ARTIFACTS_DESTINATION) via le rôle d'instance.
 x-airflow-common: &airflow-common
+  build:
+    context: ../..
+    dockerfile: Dockerfile.airflow
   image: ${AIRFLOW_IMAGE:-ghcr.io/emelineroblot/churnguard-airflow:main}
   environment: &airflow-env
     AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql+psycopg2://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/airflow
@@ -14,6 +18,8 @@ x-airflow-common: &airflow-common
     CHURNGUARD_API_URL: http://api:8000
     DATABASE_URL: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/churnguard
     ALERT_WEBHOOK_URL: ${ALERT_WEBHOOK_URL:-}
+    MLFLOW_S3_ENDPOINT_URL: ${MLFLOW_S3_ENDPOINT_URL:-}
+    AWS_DEFAULT_REGION: ${AWS_DEFAULT_REGION:-}
     CHURNGUARD_ROOT: /opt/airflow
     PYTHONPATH: /opt/airflow
   volumes:
@@ -41,12 +47,19 @@ services:
       retries: 5
 
   mlflow:
+    build:
+      context: ../..
+      dockerfile: Dockerfile.mlflow
     image: ${MLFLOW_IMAGE:-ghcr.io/emelineroblot/churnguard-mlflow:main}
+    environment:
+      # s3://bucket/mlflow-artifacts en prod AWS (rôle d'instance, IMDSv2 hop_limit 2) ; volume local sinon
+      MLFLOW_S3_ENDPOINT_URL: ${MLFLOW_S3_ENDPOINT_URL:-}
+      AWS_DEFAULT_REGION: ${AWS_DEFAULT_REGION:-}
     command: >
       mlflow server
       --backend-store-uri postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/mlflow
       --serve-artifacts
-      --artifacts-destination /mlruns
+      --artifacts-destination ${MLFLOW_ARTIFACTS_DESTINATION:-/mlruns}
       --allowed-hosts *
       --cors-allowed-origins *
       --host 0.0.0.0
@@ -63,6 +76,9 @@ services:
       retries: 10
 
   api:
+    build:
+      context: ../..
+      dockerfile: Dockerfile
     image: ${API_IMAGE:-ghcr.io/emelineroblot/churnguard-api:main}
     ports:
       - "8000:8000"
@@ -70,6 +86,8 @@ services:
       MLFLOW_TRACKING_URI: http://mlflow:5000
       MLFLOW_MODEL_NAME: churnguard-model
       MLFLOW_MODEL_STAGE: Production
+      MLFLOW_S3_ENDPOINT_URL: ${MLFLOW_S3_ENDPOINT_URL:-}
+      AWS_DEFAULT_REGION: ${AWS_DEFAULT_REGION:-}
       DATABASE_URL: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/churnguard
     command: uvicorn src.api.main:app --host 0.0.0.0 --port 8000 --workers ${API_WORKERS:-2}
     restart: always

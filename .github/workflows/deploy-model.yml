@@ -4,7 +4,7 @@ name: Deploy model to HuggingFace Space
 #   - manuellement (workflow_dispatch) après une promotion dans MLflow + `dvc push` de model_artifacts/
 #   - automatiquement sur un tag `model-v*` (ex. `git tag model-v5 && git push --tags`)
 # Le Space Docker reconstruit l'image et sert la nouvelle version via MODEL_PATH.
-# Secrets requis : HF_TOKEN (write), DAGSHUB_USER, DAGSHUB_TOKEN. Variable : HF_SPACE (ex. emeliner/churnguard-api).
+# Secrets requis : HF_TOKEN (write), DAGSHUB_USER, DAGSHUB_TOKEN. Variable : HF_SPACE (ex. EmelineR/churnguard).
 
 on:
   workflow_dispatch:
@@ -16,7 +16,7 @@ jobs:
     runs-on: ubuntu-latest
     env:
       HF_TOKEN: ${{ secrets.HF_TOKEN }}
-      HF_SPACE: ${{ vars.HF_SPACE || 'emeliner/churnguard-api' }}
+      HF_SPACE: ${{ vars.HF_SPACE || 'EmelineR/churnguard' }}
       DAGSHUB_USER: ${{ secrets.DAGSHUB_USER }}
       DAGSHUB_TOKEN: ${{ secrets.DAGSHUB_TOKEN }}
     steps:

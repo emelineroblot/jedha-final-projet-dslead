@@ -1,6 +1,6 @@
 # ChurnGuard API — guide d'intégration
 
-Base URL (stack dev) : `http://localhost:8001` · Space HF : `https://emeliner-churnguard-api.hf.space`
+Base URL (stack dev) : `http://localhost:8001` · Space HF : `https://emeliner-churnguard.hf.space`
 Documentation interactive : `GET /docs` (Swagger UI) · `GET /redoc` · schéma OpenAPI : `GET /openapi.json`
 
 Version API : `1.1.0` · Aucune authentification (périmètre projet — à placer derrière un reverse proxy / clé API en production).

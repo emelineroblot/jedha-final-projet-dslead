@@ -66,10 +66,10 @@ Latence API mesurée sur la stack Docker (`python scripts/bench_latency.py`) : *
 
 | Service | HuggingFace Space |
 |---|---|
-| API (Swagger) | https://huggingface.co/spaces/emeliner/churnguard-api |
-| Dashboard Streamlit (CRM SeoLap simulé) | https://huggingface.co/spaces/emeliner/churnguard-demo |
-| MLflow (runs + registry, lecture seule) | https://huggingface.co/spaces/emeliner/churnguard-mlflow |
-| Airflow (DAGs, vitrine — ne pas déclencher) | https://huggingface.co/spaces/emeliner/churnguard-airflow |
+| API (Swagger) | https://huggingface.co/spaces/EmelineR/churnguard |
+| Dashboard Streamlit (CRM SeoLap simulé) | https://huggingface.co/spaces/EmelineR/churnguard-demo |
+| MLflow (runs + registry, lecture seule) | https://huggingface.co/spaces/EmelineR/churnguard-mlflow |
+| Airflow (DAGs, vitrine — ne pas déclencher) | https://huggingface.co/spaces/EmelineR/churnguard-airflow |
 
 Les Spaces MLflow et Airflow sont des vitrines sans exécution (pas de worker, base SQLite). Le cycle complet s'exécute sur la stack Docker locale ci-dessous.
 

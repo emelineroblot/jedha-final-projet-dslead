@@ -102,6 +102,7 @@ Livrable Jedha « vidéo de la solution fonctionnant en production » → le pip
 - **P42** : `src/`, `data/` et `reports/` montés dans Airflow (UID 50000) → `chown -R 50000:0` au bootstrap et dans `deploy.sh`. **Pas de volume nommé pour `reports`** : créé root (dossier absent de l'image) → `PermissionError` dans `check_drift`.
 - **P43** : `--workers N` uvicorn + état modèle en mémoire → `/model/reload` ne recharge qu'un worker (l'API servait v1 et 503 en alternance). **1 worker par conteneur** en prod ; scaler par réplication.
 - **P44** : avec artefacts S3, `load_model("runs:/<id>/model")` prend **494 s** (résolution logged models MLflow 3) contre 0,9 s via `models:/churnguard-model/N` → `evaluate_model` charge le candidat par sa version (`registry.version_for_run`).
+- **P46** : `deploy.sh` fait `git reset --hard` sur son propre fichier pendant que bash l'exécute → bash lit la suite du NOUVEAU fichier à l'ancien offset (commandes tronquées ; le `chown` sauté a laissé `airflow-logs/` à root et `up -d` a échoué via SSM). Corps du script dans une fonction appelée en dernière ligne. Logs de tâches Airflow en bind mount `airflow-logs/` (gitignoré) — sans ça ils disparaissent à chaque recréation des conteneurs.
 - **P38 (corrigé)** : un DAG **en pause n'exécute jamais ses runs**, même `airflow dags trigger` (reste `queued`). Le dépauser lance une fois son dernier intervalle manqué (`catchup=False` n'empêche pas ce run unique). Prod : les deux DAGs activés au bootstrap, `max_active_runs=1` sérialise planifié + manuel.
 
 ---

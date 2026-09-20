@@ -43,7 +43,7 @@ Entraîné sur le dataset Kaggle **muhammadshahidazeem** (440 k lignes), conçu 
 | Monitoring | Evidently | Dérive référence vs production (prédictions reçues ou fenêtre labellisée), rapport horodaté, alerte Discord/Slack |
 | Orchestration | Airflow | `batch_scoring` (quotidien) · `auto_retraining` (hebdo) : dérive **ou** nouvelles données → retrain → évaluation hold-out → promotion + reload API + smoke test → rollback si échec |
 | CI/CD | GitHub Actions, GHCR, AWS SSM | lint + 35 tests → validation du modèle (F1 ≥ 0,75) → build de 3 images → déploiement continu sur l'EC2 AWS (+ HF Spaces via `deploy-model.yml`) |
-| Production | Terraform, AWS EC2 / S3 / IAM | infrastructure as code (23 ressources), stack prod `docker/prod/`, données et artefacts MLflow dans S3 — [docs/deployment-aws.md](docs/deployment-aws.md) |
+| Production | Terraform, AWS EC2 / S3 / IAM | infrastructure as code (24 ressources), stack prod `docker/prod/` (API, MLflow, Airflow, PostgreSQL, dashboard Streamlit), données et artefacts MLflow dans S3 — [docs/deployment-aws.md](docs/deployment-aws.md) |
 
 ---
 
@@ -248,7 +248,7 @@ Variables : `MLFLOW_TRACKING_URI`, `CHURNGUARD_API_URL`, `DATABASE_URL`, `ALERT_
 |---|---|---|
 | `test` | `ruff check src/ tests/` + `pytest tests/` (API, preprocessing, monitoring, training) | lint ou test rouge |
 | `validate-model` | `dvc pull model_artifacts` puis F1 ≥ 0,75 sur `tests/fixtures/sample_test.csv` (500 lignes hold-out) | F1 insuffisant — ignoré avec warning si les secrets DagsHub sont absents |
-| `build` | 3 images (`churnguard-api`, `churnguard-mlflow`, `churnguard-airflow`) → GHCR, tags `main` + `main-<sha>` | — |
+| `build` | 4 images (`churnguard-api`, `churnguard-mlflow`, `churnguard-airflow`, `churnguard-dashboard`) → GHCR, tags `main` + `main-<sha>` | — |
 | `deploy` | SSM Run Command → `scripts/deploy.sh` sur l'EC2 AWS (git reset `main`, `compose build`, `up -d`, reload API) | ignoré avec warning si les secrets AWS sont absents (infra détruite hors soutenance) |
 
 `.github/workflows/deploy-model.yml` (manuel ou tag `model-v*`) : pull du modèle (DVC) → validation → bundle → push sur le Space HF `churnguard-api`. Ce workflow déploie une **mise à jour du modèle** indépendamment du code.
@@ -268,7 +268,7 @@ security group restreint à l'IP de l'opérateur, S3 chiffré/versionné (donné
 ```bash
 cd infra/terraform
 terraform init && terraform apply     # ≈ 1 min + ≈ 15–20 min de bootstrap (build des images, entraînement baseline v1)
-terraform output                      # api_url · airflow_url · mlflow_url · ssh · bootstrap_log
+terraform output                      # api_url · dashboard_url · airflow_url · mlflow_url · ssh · bootstrap_log
 terraform destroy                     # ≈ 2,5 $/jour sinon
 ```
 
@@ -310,13 +310,13 @@ ruff check src/ tests/
 ├── tests/                       # + fixtures/sample_test.csv (500 lignes hold-out)
 ├── scripts/                     # bench_latency.py · deploy.sh (mise à jour de l'instance prod) · gen_diagrams.py
 ├── docker/dev/ · docker/prod/   # compose séparés (+ .env.example prod)
-├── Dockerfile · Dockerfile.mlflow · Dockerfile.airflow · Dockerfile.hf
+├── Dockerfile · Dockerfile.mlflow · Dockerfile.airflow · Dockerfile.dashboard · Dockerfile.hf
 ├── .github/workflows/           # ci.yml (test → validate → build → deploy SSM) · deploy-model.yml
 ├── infra/terraform/             # EC2 + S3 + IAM + SG (main.tf · user_data.sh · outputs.tf)
 ├── dvc.yaml · dvc.lock · model_artifacts.dvc · data/*.dvc
 ├── docs/                        # architecture/ · api.md · dataset-report.md · model-card.md · deployment-aws.md
 ├── notebooks/                   # 02_eda_new_dataset.ipynb (EDA dataset actif) · 01_eda.ipynb (rivalytics, archivé)
-├── demo/                        # dashboard Streamlit (Space churnguard-demo)
+├── demo/                        # dashboard Streamlit (service `dashboard` de la stack + Space churnguard-demo)
 └── screens/                     # captures de la stack
 ```
 

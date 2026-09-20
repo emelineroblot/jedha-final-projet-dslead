@@ -17,18 +17,19 @@
 
 ```mermaid
 flowchart TB
-    OP["Poste opérateur<br/>terraform apply · API :8000 · Airflow :8080 · MLflow :5000"]
+    OP["Poste opérateur / jury<br/>terraform apply · API :8000 · Dashboard :8501 · Airflow :8080 · MLflow :5000"]
     GH[("GitHub<br/>jedha-final-projet-dslead")]
     CI["GitHub Actions<br/>test → validate-model → build → deploy"]
 
-    subgraph AWS["AWS eu-north-1 — VPC par défaut — 23 ressources Terraform"]
+    subgraph AWS["AWS eu-north-1 — VPC par défaut — 24 ressources Terraform"]
         subgraph EC2["EC2 m7i-flex.large · EBS 30 Go chiffré · rôle d'instance (S3 + SSM) · docker compose"]
             API["API FastAPI :8000<br/>/predict · /predict/batch · /model/info · /model/reload · /metrics"]
+            DASH["Dashboard Streamlit :8501<br/>contacts SeoLap scorés (démo CRM)"]
             AF["Airflow 2.9<br/>webserver · scheduler<br/>DAG batch_scoring · DAG auto_retraining"]
             MLF["MLflow 3 server<br/>registry churnguard-model @ Production"]
             PG[("PostgreSQL 15<br/>churnguard (predictions) · mlflow · airflow")]
         end
-        S3[("S3 — chiffré, versionné<br/>data/processed/*.csv · mlflow-artifacts/")]
+        S3[("S3 — chiffré, versionné<br/>data/processed/*.csv · demo/users.csv · mlflow-artifacts/")]
         SSM["SSM Run Command"]
     end
 
@@ -38,7 +39,8 @@ flowchart TB
     GH -- "git clone au boot" --> EC2
     GH -- "push main" --> CI
     CI -- "send-command : scripts/deploy.sh" --> SSM --> EC2
-    S3 -- "s3 sync (données)" --> EC2
+    S3 -- "s3 sync (données, contacts)" --> EC2
+    DASH -- "/predict/batch" --> API
     MLF -- "artefacts (rôle d'instance)" --> S3
     AF -- "train / evaluate / promote" --> MLF
     MLF -- "load_model Production" --> API
@@ -60,7 +62,8 @@ flowchart TB
 | Rapports Evidently | `reports/` local | `reports/` du clone en bind mount (`chown 50000`) : `drift_report.{json,html}` + `history/` |
 | API | `--reload`, 1 process | `restart: always`, **1 worker** uvicorn (état du modèle en mémoire : `/model/reload` ne toucherait qu'un worker sur N) — montée en charge par réplication du conteneur |
 | Secrets | `.env` écrit à la main | **générés par Terraform** (`random_password`), écrits dans `/opt/churnguard/docker/prod/.env` (`chmod 600`) |
-| Accès | `localhost` | security group **ouvert** (22, 8000, 5000, 8080 — `operator_cidr = 0.0.0.0/0`, choix démo jury) : SSH par clé uniquement, Airflow par mot de passe, API et MLflow sans authentification |
+| Dashboard Streamlit | Space HF `churnguard-demo` → API du Space HF | service `dashboard` :8501 de la stack, `CHURNGUARD_API_URL=http://api:8000` → score avec le modèle Production courant ; `demo/users.csv` (contacts SeoLap, hors git) poussé dans S3 par Terraform et monté dans le conteneur |
+| Accès | `localhost` | security group **ouvert** (22, 8000, 8501, 5000, 8080 — `operator_cidr = 0.0.0.0/0`, choix démo jury) : SSH par clé uniquement, Airflow par mot de passe, API, dashboard et MLflow sans authentification |
 | Mise à jour du code | rebuild manuel | **job CI `deploy`** : SSM → `scripts/deploy.sh` (git reset sur `main`, build, `up -d`, reload API) |
 
 ## 2. Ce que fait `user_data.sh` au premier démarrage
@@ -68,7 +71,7 @@ flowchart TB
 1. Installe Docker, compose, AWS CLI v2.
 2. Clone le dépôt (`repo_ref`, défaut `main`) dans `/opt/churnguard`.
 3. Écrit `docker/prod/.env` avec les secrets Terraform (Postgres, admin Airflow, secret key, webhook Discord, bucket S3).
-4. `aws s3 sync` des données processées (référence 440 k lignes, fenêtre incoming, hold-out).
+4. `aws s3 sync` des données processées (référence 440 k lignes, fenêtre incoming, hold-out) + `demo/users.csv` (dashboard).
 5. `docker compose build && up -d` (prod) — le conteneur Postgres crée les 3 bases au premier démarrage.
 6. Quand MLflow répond : `compose run --no-deps airflow-scheduler python -m src.training.train` → LogReg / RF / XGBoost comparés sur la référence (≈ 4 min sur 2 vCPU), le meilleur enregistré **v1**, puis `registry set-production --version 1` (mise en service initiale, hors gate F1 ≥ 0,70).
 7. `POST /model/reload` : l'API (démarrée sans modèle, `/predict` en 503) charge v1.
@@ -85,7 +88,7 @@ cp infra/terraform/terraform.tfvars.example infra/terraform/terraform.tfvars   #
 cd infra/terraform
 terraform init
 terraform apply                         # ≈ 1 min, puis ≈ 12 min de bootstrap sur l'EC2 (build 5 min, entraînement 4 min)
-terraform output                        # api_url, airflow_url, mlflow_url, ssh, bootstrap_log, s3_bucket
+terraform output                        # api_url, dashboard_url, airflow_url, mlflow_url, ssh, bootstrap_log, s3_bucket
 terraform output -raw airflow_login
 terraform output -json github_secrets   # AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY, AWS_REGION, EC2_INSTANCE_ID → secrets GitHub
 ```
@@ -95,7 +98,7 @@ qui passe `test` et `validate-model` exécute `scripts/deploy.sh` sur l'instance
 L'user IAM `churnguard-github-deploy` ne peut que `ssm:SendCommand` sur cette instance — aucun port SSH n'est ouvert aux runners.
 Sans secrets, le job est ignoré avec un avertissement. À la main : `terraform output -raw ssh` puis `sudo bash /opt/churnguard/scripts/deploy.sh main`.
 
-**Arrêt** : `terraform destroy` — supprime les 23 ressources, bucket inclus (`force_destroy`).
+**Arrêt** : `terraform destroy` — supprime les 24 ressources, bucket inclus (`force_destroy`).
 
 Pause sans détruire (données conservées sur l'EBS, ~0,1 $/jour) : `aws ec2 stop-instances --instance-ids $(terraform output -raw instance_id)` ;
 l'IP publique change au redémarrage (`terraform refresh` puis `output`). Pour restreindre l'accès à une IP : `operator_cidr = ""` (détection automatique) ou `"1.2.3.4/32"` dans `terraform.tfvars`, puis `terraform apply`.
@@ -149,4 +152,5 @@ Préparation (hors vidéo) : `registry rollback --version 1` + `POST /model/relo
 4. Airflow (`http://<ip>:8080`) : `batch_scoring` vert (500 comptes), puis **▶ trigger `auto_retraining`** → `check_drift` (9/15 features en dérive) → `retrain_model` → `evaluate_model` → `promote_model` (< 1 min).
 5. Discord : « Réentraînement déclenché » puis « Nouveau modèle en Production — v1 → vN (F1 0,690 → 0,978) ».
 6. Retour API : `GET /model/info` → **vN** sans redémarrage ; MLflow : v1 archivée ; rollback en une commande si besoin.
-7. GitHub Actions : le run du dernier push sur `main` avec le job `deploy` vert (SSM).
+7. Dashboard (`http://<ip>:8501`) : « Scorer tous les contacts » → les 50 comptes SeoLap scorés par le nouveau modèle, segments risque élevé / moyen / faible (côté CRM).
+8. GitHub Actions : le run du dernier push sur `main` avec le job `deploy` vert (SSM).

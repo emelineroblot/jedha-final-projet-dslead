@@ -297,8 +297,8 @@ def diagram_aws():
     W, H = 1500, 730
     b = ""
     # opérateur + GitHub + alertes, en haut
-    b += block(40, 90, 330, 118, "Poste opérateur", ["Terraform", "AWS"],
-               ["terraform apply → 23 ressources", "Seule IP autorisée (SG) : SSH, API, UIs"], "grey")
+    b += block(40, 90, 330, 118, "Poste opérateur / jury", ["Terraform", "AWS"],
+               ["terraform apply → 24 ressources", "SG ouvert : SSH (clé), API, dashboard, UIs"], "grey")
     b += block(430, 90, 400, 118, "GitHub Actions — CI/CD", ["GitHub Actions", "pytest", "Docker", "SSM"],
                ["test → validate-model → build → deploy", "deploy : SSM Run Command → scripts/deploy.sh"], "grey")
     b += block(890, 90, 330, 118, "Alertes", ["Discord/Slack"],
@@ -312,7 +312,7 @@ def diagram_aws():
     b += text(80, 318, "EC2 m7i-flex.large · Ubuntu 24.04 · EBS 30 Go chiffré · rôle d'instance (S3 + SSM) · docker compose prod", size=13, weight="bold")
     y, h, w, gap = 366, 150, 235, 22
     xs = [80 + i * (w + gap) for i in range(4)]
-    b += block(xs[0], y, w, h, "API", ["FastAPI", "Docker"], ["/predict · /predict/batch", "/model/info · /model/reload", "charge churnguard-model @ Production"], "blue")
+    b += block(xs[0], y, w, h, "API + Dashboard", ["FastAPI", "Streamlit"], ["/predict · /predict/batch · /model/info", "/model/reload · :8000", "Dashboard CRM :8501 (contacts SeoLap)"], "blue")
     b += block(xs[1], y, w, h, "Base de données", ["PostgreSQL"], ["churnguard : predictions", "mlflow : backend store", "airflow : metadata"], "cyan")
     b += block(xs[2], y, w, h, "Orchestration", ["Airflow"], ["batch_scoring (quotidien)", "auto_retraining (dérive OU", "5 000 nouvelles lignes)"], "yellow")
     b += block(xs[3], y, w, h, "Tracking & Registry", ["MLflow"], ["experiment churnguard", "churnguard-model v1 → v2", "artefacts → S3"], "green")
@@ -322,7 +322,7 @@ def diagram_aws():
                ["Docker → clone GitHub → .env (secrets Terraform) → s3 sync", "→ compose build/up → train baseline v1 → reload API"], "violet")
     # S3 + secrets à droite
     b += block(1130, 320, 300, 150, "S3 — chiffré, versionné", ["S3"],
-               ["data/processed/*.csv", "(référence, incoming, hold-out)", "mlflow-artifacts/ (modèles, figures)"], "green")
+               ["data/processed/*.csv · demo/users.csv", "(référence, incoming, hold-out, contacts)", "mlflow-artifacts/ (modèles, figures)"], "green")
     b += block(1130, 500, 300, 158, "Secrets & accès", ["Terraform"],
                ["mots de passe générés (random)", "clé SSH générée · aucune clé AWS", "sur l'instance (IMDSv2)", "user IAM github-deploy : SSM seul"], "grey")
 

@@ -1,4 +1,4 @@
 # Copier en terraform.tfvars (gitignoré)
 alert_webhook_url = "https://discord.com/api/webhooks/…"
-# operator_cidr   = "1.2.3.4/32"   # défaut : IP publique détectée à l'apply
+# operator_cidr   = "1.2.3.4/32"   # défaut : 0.0.0.0/0 (ouvert) ; "" = IP publique détectée à l'apply
 # repo_ref        = "main"

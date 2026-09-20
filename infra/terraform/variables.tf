@@ -23,9 +23,9 @@ variable "ec2_instance_type" {
 }
 
 variable "operator_cidr" {
-  description = "CIDR autorisé (SSH, API, UIs). Vide = IP publique courante détectée automatiquement"
+  description = "CIDR autorisé (SSH, API, UIs). 0.0.0.0/0 = ouvert (démo jury : SSH par clé, Airflow par mot de passe) ; vide = IP publique courante"
   type        = string
-  default     = ""
+  default     = "0.0.0.0/0"
 }
 
 variable "data_dir" {

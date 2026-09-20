@@ -17,7 +17,7 @@
 
 ```mermaid
 flowchart TB
-    OP["Poste opérateur — IP unique autorisée<br/>terraform apply · API :8000 · Airflow :8080 · MLflow :5000"]
+    OP["Poste opérateur<br/>terraform apply · API :8000 · Airflow :8080 · MLflow :5000"]
     GH[("GitHub<br/>jedha-final-projet-dslead")]
     CI["GitHub Actions<br/>test → validate-model → build → deploy"]
 
@@ -60,7 +60,7 @@ flowchart TB
 | Rapports Evidently | `reports/` local | `reports/` du clone en bind mount (`chown 50000`) : `drift_report.{json,html}` + `history/` |
 | API | `--reload`, 1 process | `restart: always`, **1 worker** uvicorn (état du modèle en mémoire : `/model/reload` ne toucherait qu'un worker sur N) — montée en charge par réplication du conteneur |
 | Secrets | `.env` écrit à la main | **générés par Terraform** (`random_password`), écrits dans `/opt/churnguard/docker/prod/.env` (`chmod 600`) |
-| Accès | `localhost` | security group restreint à **l'IP publique de l'opérateur** (22, 8000, 5000, 8080) |
+| Accès | `localhost` | security group **ouvert** (22, 8000, 5000, 8080 — `operator_cidr = 0.0.0.0/0`, choix démo jury) : SSH par clé uniquement, Airflow par mot de passe, API et MLflow sans authentification |
 | Mise à jour du code | rebuild manuel | **job CI `deploy`** : SSM → `scripts/deploy.sh` (git reset sur `main`, build, `up -d`, reload API) |
 
 ## 2. Ce que fait `user_data.sh` au premier démarrage
@@ -98,7 +98,7 @@ Sans secrets, le job est ignoré avec un avertissement. À la main : `terraform 
 **Arrêt** : `terraform destroy` — supprime les 23 ressources, bucket inclus (`force_destroy`).
 
 Pause sans détruire (données conservées sur l'EBS, ~0,1 $/jour) : `aws ec2 stop-instances --instance-ids $(terraform output -raw instance_id)` ;
-l'IP publique change au redémarrage (`terraform refresh` puis `output`). Si l'IP de l'opérateur change : `terraform apply` met à jour le security group.
+l'IP publique change au redémarrage (`terraform refresh` puis `output`). Pour restreindre l'accès à une IP : `operator_cidr = ""` (détection automatique) ou `"1.2.3.4/32"` dans `terraform.tfvars`, puis `terraform apply`.
 
 ## 4. Coût
 
@@ -115,9 +115,9 @@ l'IP publique change au redémarrage (`terraform refresh` puis `output`). Si l'I
 - Aucune clé AWS dans le code ni sur l'instance : S3 est accédé via le **rôle d'instance** (IMDSv2, `hop_limit = 2` pour que les conteneurs MLflow/Airflow y accèdent).
 - Mots de passe Postgres et Airflow, secret key Airflow **générés** par Terraform, stockés dans l'état local (gitignoré) et dans `.env` sur l'instance.
 - Clé SSH générée par Terraform → `infra/terraform/keys/` (gitignoré). Clés du user `github-deploy` uniquement dans l'état Terraform et les secrets GitHub.
-- Security group : tout est fermé sauf l'IP de l'opérateur ; les runners GitHub passent par SSM (canal sortant de l'agent), pas par SSH.
+- Security group ouvert pour la démo (le jury peut ouvrir les URLs) : SSH accepte uniquement la clé générée, Airflow demande un mot de passe généré ; les runners GitHub passent par SSM (canal sortant de l'agent), pas par SSH. Restriction à une IP en une variable (`operator_cidr`).
 - Chiffrement at-rest : volume EC2 (Postgres inclus), S3 (AES-256) ; versioning S3 ; bucket privé.
-- Limites assumées : UIs et API en HTTP (pas de TLS, pas de domaine) ; base non managée (pas de sauvegarde automatique — snapshot EBS ou RDS en cible) — acceptable pour une démo restreinte à une IP, pas pour une vraie production (reverse proxy TLS, RDS privé, Secrets Manager, auth sur l'API).
+- Limites assumées : UIs et API en HTTP (pas de TLS, pas de domaine), API et MLflow sans authentification, base non managée (pas de sauvegarde automatique — snapshot EBS ou RDS en cible) — acceptable pour une démo éphémère détruite après la soutenance, pas pour une vraie production (reverse proxy TLS, auth sur l'API, RDS privé, Secrets Manager, security group restreint).
 
 ## 6. Pièges rencontrés
 

@@ -43,7 +43,7 @@ data "aws_subnets" "default" {
   }
 }
 
-# IP publique de l'opérateur : seul accès autorisé aux UIs, à l'API et à SSH
+# IP publique de l'opérateur (utilisée seulement si operator_cidr = "")
 data "http" "my_ip" {
   url = "https://checkip.amazonaws.com"
 }

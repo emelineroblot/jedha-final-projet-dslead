@@ -63,6 +63,7 @@ secrets/
 # Logs
 *.log
 logs/
+airflow-logs/
 
 # Jupyter checkpoints
 .ipynb_checkpoints/

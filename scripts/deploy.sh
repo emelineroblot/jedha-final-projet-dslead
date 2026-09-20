@@ -13,8 +13,9 @@ git reset --hard FETCH_HEAD
 echo "déploiement de $(git rev-parse --short HEAD) ($REF)"
 
 # src/ et data/ sont montés dans les conteneurs Airflow (UID 50000)
-chown -R 50000:0 src data reports 2>/dev/null || true
-chmod -R g+rwX src data reports 2>/dev/null || true
+mkdir -p airflow-logs
+chown -R 50000:0 src data reports airflow-logs 2>/dev/null || true
+chmod -R g+rwX src data reports airflow-logs 2>/dev/null || true
 
 COMPOSE="docker compose --env-file docker/prod/.env -f docker/prod/docker-compose.yml"
 $COMPOSE build

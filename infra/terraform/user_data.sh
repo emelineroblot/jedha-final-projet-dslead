@@ -50,13 +50,13 @@ EOF
 chmod 600 $APP/docker/prod/.env
 
 # ─── Données processées depuis S3 (référence, fenêtre incoming, hold-out) ───
-mkdir -p $APP/data/processed $APP/reports
+mkdir -p $APP/data/processed $APP/reports $APP/airflow-logs
 aws s3 sync "s3://${s3_bucket}/data/processed" $APP/data/processed
 aws s3 cp "s3://${s3_bucket}/demo/users.csv" $APP/demo/users.csv   # contacts du dashboard Streamlit
 
 # ─── Permissions pour l'UID airflow (50000) des conteneurs : src/ et data/ sont montés ───
-chown -R 50000:0 $APP/src $APP/data $APP/reports
-chmod -R g+rwX $APP/src $APP/data $APP/reports
+chown -R 50000:0 $APP/src $APP/data $APP/reports $APP/airflow-logs
+chmod -R g+rwX $APP/src $APP/data $APP/reports $APP/airflow-logs
 
 # ─── Stack (images construites sur l'instance depuis le clone — pas de registry privé à authentifier) ───
 cd $APP

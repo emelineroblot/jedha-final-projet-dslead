@@ -27,6 +27,7 @@ x-airflow-common: &airflow-common
     - ${CHURNGUARD_HOME:-/opt/churnguard}/src:/opt/airflow/src
     - ${CHURNGUARD_HOME:-/opt/churnguard}/data:/opt/airflow/data
     - ${CHURNGUARD_HOME:-/opt/churnguard}/reports:/opt/airflow/reports   # bind mount (chown 50000) — un volume nommé serait créé root
+    - ${CHURNGUARD_HOME:-/opt/churnguard}/airflow-logs:/opt/airflow/logs   # logs de tâches persistants (survivent aux redéploiements)
   restart: always
 
 services:

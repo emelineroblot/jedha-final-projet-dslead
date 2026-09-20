@@ -103,6 +103,23 @@ services:
       interval: 10s
       retries: 10
 
+  # Dashboard Streamlit (démo CRM) — score les contacts SeoLap via l'API de prod
+  dashboard:
+    build:
+      context: ../..
+      dockerfile: Dockerfile.dashboard
+    image: ${DASHBOARD_IMAGE:-ghcr.io/emelineroblot/churnguard-dashboard:main}
+    ports:
+      - "8501:8501"
+    environment:
+      CHURNGUARD_API_URL: http://api:8000
+    volumes:
+      - ${CHURNGUARD_HOME:-/opt/churnguard}/demo/users.csv:/app/demo/users.csv:ro   # données SeoLap (S3, hors git)
+    restart: always
+    depends_on:
+      api:
+        condition: service_healthy
+
   airflow-init:
     <<: *airflow-common
     restart: "no"

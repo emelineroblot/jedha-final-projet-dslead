@@ -1,6 +1,9 @@
+import os
+
 import requests
 
-API_URL = "https://emeliner-churnguard.hf.space"
+# Space HF par défaut ; en prod AWS le conteneur dashboard reçoit CHURNGUARD_API_URL=http://api:8000
+API_URL = os.getenv("CHURNGUARD_API_URL", "https://emeliner-churnguard.hf.space")
 TIMEOUT = 30
 
 

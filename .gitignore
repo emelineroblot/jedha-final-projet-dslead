@@ -29,6 +29,7 @@ hf-demo/
 
 # Exports SeoLap (données utilisateurs — non versionnées)
 exports/
+demo/users.csv
 
 
 # Docker

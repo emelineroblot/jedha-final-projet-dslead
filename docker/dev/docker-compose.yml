@@ -94,6 +94,22 @@ services:
       interval: 10s
       retries: 10
 
+  # Dashboard Streamlit (démo CRM) — users.csv vient de hf-demo/ (données SeoLap, hors git)
+  dashboard:
+    build:
+      context: ../..
+      dockerfile: Dockerfile.dashboard
+    ports:
+      - "8501:8501"
+    environment:
+      CHURNGUARD_API_URL: http://api:8000
+    volumes:
+      - ../../demo:/app/demo
+      - ../../hf-demo/users.csv:/app/demo/users.csv:ro
+    depends_on:
+      api:
+        condition: service_healthy
+
   airflow-init:
     <<: *airflow-common
     command:

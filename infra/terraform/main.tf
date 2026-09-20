@@ -52,9 +52,10 @@ locals {
   my_cidr = var.operator_cidr != "" ? var.operator_cidr : "${chomp(data.http.my_ip.response_body)}/32"
   name    = "churnguard"
   ui_ports = {
-    api     = 8000
-    mlflow  = 5000
-    airflow = 8080
+    api       = 8000
+    mlflow    = 5000
+    airflow   = 8080
+    dashboard = 8501
   }
   # Fichiers poussés dans S3 puis synchronisés sur l'instance au boot (data/processed/, non versionnés dans git)
   data_files = {
@@ -134,6 +135,14 @@ resource "aws_s3_object" "data" {
   key      = "data/processed/${each.key}"
   source   = each.value
   etag     = filemd5(each.value)
+}
+
+# Contacts SeoLap du dashboard (données utilisateurs, hors git) — montés dans le conteneur dashboard
+resource "aws_s3_object" "users_csv" {
+  bucket = aws_s3_bucket.data.id
+  key    = "demo/users.csv"
+  source = var.users_csv_path
+  etag   = filemd5(var.users_csv_path)
 }
 
 # ───────────────────────── Secrets (générés, jamais dans le dépôt) ─────────────────────────
@@ -284,5 +293,5 @@ resource "aws_instance" "app" {
 
   tags = { Name = "${local.name}-app" }
 
-  depends_on = [aws_s3_object.data]
+  depends_on = [aws_s3_object.data, aws_s3_object.users_csv]
 }

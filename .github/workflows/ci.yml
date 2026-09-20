@@ -76,6 +76,8 @@ jobs:
             dockerfile: Dockerfile.mlflow
           - name: churnguard-airflow
             dockerfile: Dockerfile.airflow
+          - name: churnguard-dashboard
+            dockerfile: Dockerfile.dashboard
     steps:
       - uses: actions/checkout@v4
       # buildx récent obligatoire : l'ancien service de cache Actions (v1) est arrêté, le cache type=gha

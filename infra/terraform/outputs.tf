@@ -6,6 +6,10 @@ output "api_docs_url" {
   value = "http://${aws_instance.app.public_ip}:8000/docs"
 }
 
+output "dashboard_url" {
+  value = "http://${aws_instance.app.public_ip}:8501"
+}
+
 output "mlflow_url" {
   value = "http://${aws_instance.app.public_ip}:5000"
 }

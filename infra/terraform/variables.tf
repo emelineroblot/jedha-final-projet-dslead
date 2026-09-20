@@ -34,6 +34,12 @@ variable "data_dir" {
   default     = "../../data/processed"
 }
 
+variable "users_csv_path" {
+  description = "Export des utilisateurs SeoLap pour le dashboard Streamlit (hors git), poussé dans S3 — relatif au dossier terraform"
+  type        = string
+  default     = "../../hf-demo/users.csv"
+}
+
 variable "alert_webhook_url" {
   description = "Webhook Discord/Slack pour les alertes (dérive, promotion, échec du DAG). Vide = alertes loguées seulement"
   type        = string

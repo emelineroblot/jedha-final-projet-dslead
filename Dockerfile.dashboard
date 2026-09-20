@@ -1,0 +1,15 @@
+# Dashboard Streamlit (démo CRM SeoLap) : score les contacts via l'API ChurnGuard.
+# users.csv (données SeoLap, hors git) est monté dans /app/demo/ par docker compose.
+FROM python:3.11-slim
+ARG PIP_TRUSTED_HOST=""
+ENV PIP_TRUSTED_HOST=${PIP_TRUSTED_HOST} PIP_DEFAULT_TIMEOUT=180 PIP_RETRIES=10
+WORKDIR /app
+COPY demo/requirements.txt demo/requirements.txt
+RUN --mount=type=cache,id=churnguard-pip,target=/root/.cache/pip \
+    pip install -r demo/requirements.txt
+COPY demo/ ./demo/
+ENV PYTHONPATH=/app PYTHONUNBUFFERED=1
+EXPOSE 8501
+HEALTHCHECK --interval=30s --timeout=5s --start-period=30s --retries=3 \
+    CMD python -c "import urllib.request; urllib.request.urlopen('http://localhost:8501/_stcore/health')" || exit 1
+CMD ["streamlit", "run", "demo/app.py", "--server.port=8501", "--server.address=0.0.0.0", "--server.headless=true"]

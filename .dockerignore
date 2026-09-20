@@ -17,3 +17,9 @@ contexte/
 *.md
 tests/
 docker/
+hf-space/
+hf-demo/
+hf-mlflow/
+hf-airflow/
+infra/
+screens/

@@ -101,7 +101,7 @@ def diagram_architecture():
     b += text(60, 116, "CI / CD — GitHub Actions", size=15, weight="bold")
     p, _ = pills_row(60, 128, ["GitHub Actions", "pytest", "ruff", "Docker", "GHCR", "DVC"], 600)
     b += p
-    steps = ["git push main", "test : ruff + 35 tests", "validate-model : F1 ≥ 0.75", "build : 3 images → GHCR", "deploy : EC2 AWS via SSM"]
+    steps = ["git push main", "test : ruff + 36 tests", "validate-model : F1 ≥ 0.75", "build : 4 images → GHCR", "deploy : EC2 AWS via SSM"]
     x = 560
     for i, s_ in enumerate(steps):
         wbox = int(7.5 * len(s_)) + 16
@@ -126,7 +126,7 @@ def diagram_architecture():
     b += block(xs[4], y, w, h, "5 · Monitor & Alert", ["Evidently", "Discord/Slack"],
                ["Référence (train) vs production", "(prédictions reçues / incoming)", "Alerte si > 20 % features en dérive", "ou F1 −0.05", "Rapport JSON + HTML horodaté"], "orange")
     b += block(xs[5], y, w, h, "6 · Store & Leverage", ["PostgreSQL", "Streamlit", "HF Spaces", "Mautic"],
-               ["Table predictions (features,", "score, version, latence)", "Dashboard Streamlit (HF Space)", "Segments CRM risque élevé /", "moyen (Mautic — simulé)"], "cyan", optional=True)
+               ["Table predictions (features,", "score, version, latence)", "Dashboard Streamlit (:8501)", "Segments CRM risque élevé /", "moyen (Mautic — simulé)"], "cyan", optional=True)
 
     # flèches horizontales
     labels = ["dvc pull\ntrain", "modèle\nProduction", "appelle\n/predict/batch", "rapport\nEvidently", "scores +\nsegments"]
@@ -205,14 +205,14 @@ def diagram_cicd():
         ("git push main / PR", ["GitHub"], "grey"),
         ("test", ["ruff", "pytest"], "blue"),
         ("validate-model", ["DVC", "joblib"], "green"),
-        ("build ×3", ["Docker", "GHCR"], "violet"),
+        ("build ×4", ["Docker", "GHCR"], "violet"),
         ("deploy", ["AWS", "SSM"], "yellow"),
     ]
     subs = [
         ["push sur main", "ou pull request"],
-        ["lint src/ + tests/", "35 tests : API, preprocessing,", "monitoring, training"],
+        ["lint src/ + tests/", "36 tests : API, preprocessing,", "monitoring, training"],
         ["dvc pull model_artifacts", "F1 ≥ 0.75 sur 500 lignes", "hold-out labellisées"],
-        ["churnguard-api", "churnguard-mlflow", "churnguard-airflow", "tag main-<sha>"],
+        ["churnguard-api, -mlflow,", "-airflow, -dashboard", "tag main-<sha>"],
         ["ssm send-command →", "scripts/deploy.sh : git reset,", "compose build, up -d, reload"],
     ]
     x, y, w, h = 60, 130, 230, 150
